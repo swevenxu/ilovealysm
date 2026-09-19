@@ -16,7 +16,7 @@ import Groq from 'groq-sdk';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free';
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'qwen/qwen3.8-27b:free';
 
 // Groq free tier limits
 const GROQ_MAX_RPM = 30;          // 30 requests/minute
@@ -173,7 +173,7 @@ async function callGroq(
   const groq = getGroqClient();
 
   const response = await groq.chat.completions.create({
-    model: options.model || 'llama-3.3-70b-versatile',
+    model: options.model || 'openai/gpt-oss-120b',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userContent },
@@ -205,7 +205,7 @@ async function callGemini(
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
   const model = genAI.getGenerativeModel({
-    model: options.geminiModel || 'gemini-1.5-flash',
+    model: options.geminiModel || 'gemini-2.5-flash',
     systemInstruction: systemPrompt,
   });
 
