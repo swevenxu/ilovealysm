@@ -133,6 +133,8 @@ Then in Supabase Dashboard:
 3. Paste the contents of `supabase-schema.sql`
 4. Run the query
 
+For an existing Study Hub database, run `supabase-todo-migration.sql` as a separate query to add persistent To Do storage.
+
 ### 4. Storage Setup
 
 In Supabase Dashboard:

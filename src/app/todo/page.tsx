@@ -27,8 +27,8 @@ interface TodoItem {
   priority: Priority;
   dueDate: string;
   completed: boolean;
-  createdAt: number;
-  updatedAt: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface TodoDraft {
@@ -38,7 +38,6 @@ interface TodoDraft {
   dueDate: string;
 }
 
-const STORAGE_KEY = 'study-hub-todos';
 const priorityRank: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
 
 const emptyDraft: TodoDraft = {
@@ -47,24 +46,6 @@ const emptyDraft: TodoDraft = {
   priority: 'medium',
   dueDate: '',
 };
-
-function normalizeTodos(value: unknown): TodoItem[] {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-    .map((item) => ({
-      id: typeof item.id === 'string' ? item.id : `${Date.now()}-${Math.random()}`,
-      title: typeof item.title === 'string' ? item.title : '',
-      notes: typeof item.notes === 'string' ? item.notes : '',
-      priority: (item.priority === 'high' || item.priority === 'low' ? item.priority : 'medium') as Priority,
-      dueDate: typeof item.dueDate === 'string' ? item.dueDate : '',
-      completed: item.completed === true,
-      createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
-      updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now(),
-    }))
-    .filter((item) => item.title.trim());
-}
 
 function todayString() {
   return new Date().toISOString().slice(0, 10);
@@ -87,77 +68,123 @@ export default function TodoPage() {
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
   const [sortBy, setSortBy] = useState<SortOption>('due');
   const [showCompleted, setShowCompleted] = useState(true);
-  const [hydrated, setHydrated] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadTodos = window.setTimeout(() => {
+    async function loadTodos() {
       try {
-        const stored = window.localStorage.getItem(STORAGE_KEY);
-        if (stored) setTodos(normalizeTodos(JSON.parse(stored)));
-      } catch (error) {
-        console.error('Failed to load to-do items:', error);
+        const response = await fetch('/api/todos', { signal: AbortSignal.timeout(5000) });
+        if (!response.ok) throw new Error('Unable to load tasks from the database.');
+        const data = await response.json() as { todos?: TodoItem[] };
+        setTodos(data.todos || []);
+      } catch (loadError) {
+        console.error('Failed to load to-do items:', loadError);
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load tasks.');
       } finally {
-        setHydrated(true);
+        setLoading(false);
       }
-    }, 0);
+    }
 
-    return () => window.clearTimeout(loadTodos);
+    loadTodos();
   }, []);
-
-  useEffect(() => {
-    if (hydrated) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
-  }, [hydrated, todos]);
 
   function updateDraft(field: keyof TodoDraft, value: string) {
     setDraft((current) => ({ ...current, [field]: value }));
   }
 
-  function addTodo(event: FormEvent<HTMLFormElement>) {
+  async function addTodo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const title = draft.title.trim();
     if (!title) return;
 
-    const now = Date.now();
-    const newTodo: TodoItem = {
-      id: `${now}-${Math.random().toString(36).slice(2)}`,
-      title,
-      notes: draft.notes.trim(),
-      priority: draft.priority,
-      dueDate: draft.dueDate,
-      completed: false,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    setTodos((currentTodos) => [newTodo, ...currentTodos]);
-    setDraft(emptyDraft);
+    try {
+      const response = await fetch('/api/todos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft),
+      });
+      if (!response.ok) throw new Error('Unable to save the task.');
+      const data = await response.json() as { todo: TodoItem };
+      setTodos((currentTodos) => [data.todo, ...currentTodos]);
+      setDraft(emptyDraft);
+      setError(null);
+    } catch (saveError) {
+      console.error('Failed to save to-do item:', saveError);
+      setError(saveError instanceof Error ? saveError.message : 'Unable to save the task.');
+    }
   }
 
-  function toggleTodo(id: string) {
-    setTodos((currentTodos) => currentTodos.map((todo) => (
-      todo.id === id
-        ? { ...todo, completed: !todo.completed, updatedAt: Date.now() }
-        : todo
-    )));
+  async function toggleTodo(id: string) {
+    const todo = todos.find((item) => item.id === id);
+    if (!todo) return;
+
+    try {
+      const response = await fetch('/api/todos', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, completed: !todo.completed }),
+      });
+      if (!response.ok) throw new Error('Unable to update the task.');
+      const data = await response.json() as { todo: TodoItem };
+      setTodos((currentTodos) => currentTodos.map((item) => item.id === id ? data.todo : item));
+      setError(null);
+    } catch (updateError) {
+      console.error('Failed to update to-do item:', updateError);
+      setError(updateError instanceof Error ? updateError.message : 'Unable to update the task.');
+    }
   }
 
-  function updateTodo(id: string, changes: TodoDraft) {
+  async function updateTodo(id: string, changes: TodoDraft) {
     const title = changes.title.trim();
     if (!title) return;
 
-    setTodos((currentTodos) => currentTodos.map((todo) => (
-      todo.id === id
-        ? { ...todo, ...changes, title, notes: changes.notes.trim(), updatedAt: Date.now() }
-        : todo
-    )));
+    try {
+      const response = await fetch('/api/todos', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, ...changes, title, notes: changes.notes.trim() }),
+      });
+      if (!response.ok) throw new Error('Unable to save the task changes.');
+      const data = await response.json() as { todo: TodoItem };
+      setTodos((currentTodos) => currentTodos.map((todo) => todo.id === id ? data.todo : todo));
+      setError(null);
+    } catch (updateError) {
+      console.error('Failed to edit to-do item:', updateError);
+      setError(updateError instanceof Error ? updateError.message : 'Unable to save the task changes.');
+    }
   }
 
-  function deleteTodo(id: string) {
-    setTodos((currentTodos) => currentTodos.filter((todo) => todo.id !== id));
+  async function deleteTodo(id: string) {
+    try {
+      const response = await fetch('/api/todos', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      if (!response.ok) throw new Error('Unable to delete the task.');
+      setTodos((currentTodos) => currentTodos.filter((todo) => todo.id !== id));
+      setError(null);
+    } catch (deleteError) {
+      console.error('Failed to delete to-do item:', deleteError);
+      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete the task.');
+    }
   }
 
-  function clearCompleted() {
-    setTodos((currentTodos) => currentTodos.filter((todo) => !todo.completed));
+  async function clearCompleted() {
+    try {
+      const response = await fetch('/api/todos', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clearCompleted: true }),
+      });
+      if (!response.ok) throw new Error('Unable to clear completed tasks.');
+      setTodos((currentTodos) => currentTodos.filter((todo) => !todo.completed));
+      setError(null);
+    } catch (clearError) {
+      console.error('Failed to clear completed to-do items:', clearError);
+      setError(clearError instanceof Error ? clearError.message : 'Unable to clear completed tasks.');
+    }
   }
 
   const activeTodos = todos.filter((todo) => !todo.completed);
@@ -175,8 +202,8 @@ export default function TodoPage() {
       })
       .sort((first, second) => {
         if (sortBy === 'priority') return priorityRank[first.priority] - priorityRank[second.priority];
-        if (sortBy === 'created') return second.createdAt - first.createdAt;
-        if (!first.dueDate && !second.dueDate) return second.createdAt - first.createdAt;
+        if (sortBy === 'created') return Date.parse(second.createdAt) - Date.parse(first.createdAt);
+        if (!first.dueDate && !second.dueDate) return Date.parse(second.createdAt) - Date.parse(first.createdAt);
         if (!first.dueDate) return 1;
         if (!second.dueDate) return -1;
         return first.dueDate.localeCompare(second.dueDate);
@@ -243,8 +270,18 @@ export default function TodoPage() {
         </label>
       </div>
 
+      {error && (
+        <div role="alert" style={{ maxWidth: 980, marginBottom: 'var(--space-4)', color: 'var(--accent-rose-light)', fontSize: 'var(--text-sm)' }}>
+          {error}
+        </div>
+      )}
+
       <div className="todo-list" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-        {visibleTodos.length === 0 ? (
+        {loading ? (
+          <div className="glass-card" style={{ padding: 'var(--space-6)', color: 'var(--text-secondary)' }}>
+            Loading tasks...
+          </div>
+        ) : visibleTodos.length === 0 ? (
           <div className="empty-state glass-card animate-in animate-in-4">
             <div className="empty-state-icon"><ClipboardList size={48} /></div>
             <div className="empty-state-title">{todos.length ? 'No matching tasks' : 'Nothing on your list'}</div>
