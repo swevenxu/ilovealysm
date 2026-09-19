@@ -15,6 +15,8 @@ import Groq from 'groq-sdk';
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free';
 
 // Groq free tier limits
 const GROQ_MAX_RPM = 30;          // 30 requests/minute
@@ -211,6 +213,48 @@ async function callGemini(
   return result.response.text();
 }
 
+async function callOpenRouter(
+  systemPrompt: string,
+  userContent: string,
+  options: LLMOptions = {}
+): Promise<string> {
+  if (!OPENROUTER_MODEL.endsWith(':free')) {
+    throw new Error(`OpenRouter model must be free: ${OPENROUTER_MODEL}`);
+  }
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://ilovealysm3000.vercel.app',
+      'X-Title': 'Study Hub',
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent },
+      ],
+      temperature: options.temperature ?? 0.3,
+      max_tokens: options.maxTokens || 4096,
+      ...(options.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`OpenRouter request failed (${response.status}): ${errorBody.slice(0, 300)}`);
+  }
+
+  const data = await response.json() as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  const content = data.choices?.[0]?.message?.content || '';
+  if (!content) throw new Error('OpenRouter returned an empty response');
+  return content;
+}
+
 // ============================================================
 // Public API
 // ============================================================
@@ -227,7 +271,7 @@ export interface LLMOptions {
 /**
  * Send a prompt to the LLM with automatic Groq → Gemini failover.
  *
- * Uses Groq as primary (fast, good structured output).
+ * Uses OpenRouter's configured free model first, then Groq and Gemini fallback.
  * Falls back to Gemini when:
  * - Groq rate limit is hit (429)
  * - Groq's RPM/TPM/RPD limits are reached
@@ -239,10 +283,20 @@ export async function llmGenerate(
   systemPrompt: string,
   userContent: string,
   options: LLMOptions = {}
-): Promise<{ text: string; provider: 'groq' | 'gemini' }> {
+): Promise<{ text: string; provider: 'openrouter' | 'groq' | 'gemini' }> {
   const inputTokens = estimateTokens(systemPrompt + userContent);
   // Output is roughly same size as input for reformatting tasks
   const estimatedTotalTokens = inputTokens * 2;
+
+  // Prefer the configured OpenRouter free model. Provider errors fall through.
+  if (!options.forceGemini && OPENROUTER_API_KEY) {
+    try {
+      const text = await callOpenRouter(systemPrompt, userContent, options);
+      return { text, provider: 'openrouter' };
+    } catch (error) {
+      console.error('[LLM] OpenRouter error, falling back to Groq:', error);
+    }
+  }
 
   // Try Groq first with retry logic
   if (!options.forceGemini && canUseGroq(estimatedTotalTokens)) {
