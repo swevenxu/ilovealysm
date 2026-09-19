@@ -16,7 +16,7 @@ import Groq from 'groq-sdk';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'qwen/qwen3.8-27b:free';
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'nex-agi/nex-n2.5-mini:free';
 
 // Groq free tier limits
 const GROQ_MAX_RPM = 30;          // 30 requests/minute
