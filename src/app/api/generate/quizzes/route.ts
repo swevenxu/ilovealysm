@@ -7,6 +7,7 @@ import { handleError } from '@/lib/api-utils';
 
 export const dynamic = 'force-dynamic';
 const MAX_GENERATION_CHUNKS = 12;
+const MIN_QUESTIONS_PER_FORMAT = 10;
 
 const QUIZ_SYSTEM_PROMPT = `You are a quiz generation assistant. Generate quiz questions from the provided study content.
 
@@ -46,7 +47,7 @@ RULES:
 1. A testlet is one source item with a shared stem and multiple sub_questions. Never output a sub-question without its stem.
 2. Generate 5-10 quiz questions per chunk, but every generated question from a testlet must include the complete stem and complete sub_questions array.
 3. For standalone source items, set is_testlet to false and use the same schema with one sub_question.
-4. ~60% multiple choice, ~40% flashcards.
+4. Generate both formats as requested. When a format count is provided, return exactly that many questions for that format.
 5. Questions should test understanding, not just memorization.
 6. MC: exactly 4 options, exactly 1 correct.
 7. Difficulty mix: ~30% easy, ~50% medium, ~20% hard.
@@ -122,6 +123,8 @@ export async function POST(request: NextRequest) {
     if (!pages || pages.length === 0) return NextResponse.json({ error: 'No pages found' }, { status: 400 });
 
     let totalQuizzes = 0;
+    let multipleChoiceCount = 0;
+    let flashcardCount = 0;
     const generatedQuizIds: string[] = [];
     let lastGenerationError: string | null = null;
     const sourceText = pages.map((page) => page.raw_text || '').filter((text) => text.trim()).join('\n\n');
@@ -141,9 +144,12 @@ export async function POST(request: NextRequest) {
       if ((serializedItems.length > 6000 || currentItems.length >= 3 || isLast) && serializedItems.trim()) {
         processedChunks++;
         if (processedChunks > MAX_GENERATION_CHUNKS) break;
+        if (multipleChoiceCount >= MIN_QUESTIONS_PER_FORMAT && flashcardCount >= MIN_QUESTIONS_PER_FORMAT) break;
         try {
+          const multipleChoiceNeeded = Math.max(0, MIN_QUESTIONS_PER_FORMAT - multipleChoiceCount);
+          const flashcardsNeeded = Math.max(0, MIN_QUESTIONS_PER_FORMAT - flashcardCount);
           const result = await llmGenerate(QUIZ_SYSTEM_PROMPT,
-            `Generate 3-5 quiz questions from these complete source items. Return compact valid JSON only. Preserve each item's stem and sub_questions together:\n\n${serializedItems}`, { temperature: 0.5, maxTokens: 2500, jsonMode: true });
+            `Generate up to ${Math.min(2, multipleChoiceNeeded)} multiple-choice questions and up to ${Math.min(2, flashcardsNeeded)} flashcards from these complete source items. Return compact valid JSON only. Preserve each item's stem and sub_questions together:\n\n${serializedItems}`, { temperature: 0.5, maxTokens: 2500, jsonMode: true });
 
           const quizData = parseQuizResponse(result.text);
 
@@ -168,6 +174,15 @@ export async function POST(request: NextRequest) {
             };
           });
 
+          const insertedFormatCounts = quizRows.reduce(
+            (counts, quiz) => {
+              if (quiz.format === 'flashcard') counts.flashcards += 1;
+              else counts.multipleChoice += 1;
+              return counts;
+            },
+            { multipleChoice: 0, flashcards: 0 },
+          );
+
           if (quizRows.length > 0) {
             const { data: insertedQuizzes, error } = await supabase
               .from('quizzes')
@@ -178,6 +193,8 @@ export async function POST(request: NextRequest) {
               console.error('Quiz insert error:', error);
             } else {
               totalQuizzes += quizRows.length;
+              multipleChoiceCount += insertedFormatCounts.multipleChoice;
+              flashcardCount += insertedFormatCounts.flashcards;
               generatedQuizIds.push(...(insertedQuizzes || []).map((quiz) => quiz.id));
             }
           }
@@ -193,6 +210,18 @@ export async function POST(request: NextRequest) {
     if (totalQuizzes === 0) {
       return NextResponse.json(
         { error: lastGenerationError || 'No quizzes were generated' },
+        { status: 502 },
+      );
+    }
+
+    if (multipleChoiceCount < MIN_QUESTIONS_PER_FORMAT || flashcardCount < MIN_QUESTIONS_PER_FORMAT) {
+      if (generatedQuizIds.length > 0) {
+        await supabase.from('quizzes').delete().in('id', generatedQuizIds);
+      }
+      return NextResponse.json(
+        {
+          error: `Could not reach the minimum of ${MIN_QUESTIONS_PER_FORMAT} multiple-choice questions and ${MIN_QUESTIONS_PER_FORMAT} flashcards. Generated ${multipleChoiceCount} multiple-choice questions and ${flashcardCount} flashcards.`,
+        },
         { status: 502 },
       );
     }
