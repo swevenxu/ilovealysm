@@ -56,3 +56,10 @@ env/
 .aider.chat.history.md
 .aider.input.history
 .aider*
+
+# throwaway scan/dump artifacts
+dump_for_fix.txt
+deepseek_python_*.py
+find_llm_fix_targets.py
+scan.json
+Pasted text.txt

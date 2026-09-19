@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS quizzes (
   topic_id UUID REFERENCES topics(id),
   question TEXT NOT NULL,
   format TEXT NOT NULL
-    CHECK (format IN ('multiple_choice', 'flashcard')),
+    CHECK (format IN ('multiple_choice', 'flashcard', 'true_false')),
   options JSONB,
   answer TEXT NOT NULL,
   explanation TEXT,
