@@ -16,7 +16,17 @@ import Groq from 'groq-sdk';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'nex-agi/nex-n2.5-mini:free';
+const DEFAULT_OPENROUTER_MODELS = [
+  'nex-agi/nex-n2.5-mini:free',
+  'liquid/lfm-2.5-2.6b:free',
+  'qwen/qwen3.8-27b:free',
+  'google/gemma-4-26b-a4b-it:free',
+];
+const OPENROUTER_MODELS = (process.env.OPENROUTER_MODELS || process.env.OPENROUTER_MODEL || '')
+  .split(',')
+  .map((model) => model.trim())
+  .filter(Boolean);
+const OPENROUTER_MODEL_LIST = OPENROUTER_MODELS.length > 0 ? OPENROUTER_MODELS : DEFAULT_OPENROUTER_MODELS;
 
 // Groq free tier limits
 const GROQ_MAX_RPM = 30;          // 30 requests/minute
@@ -216,10 +226,11 @@ async function callGemini(
 async function callOpenRouter(
   systemPrompt: string,
   userContent: string,
-  options: LLMOptions = {}
+  model: string,
+  options: LLMOptions = {},
 ): Promise<string> {
-  if (!OPENROUTER_MODEL.endsWith(':free')) {
-    throw new Error(`OpenRouter model must be free: ${OPENROUTER_MODEL}`);
+  if (!model.endsWith(':free')) {
+    throw new Error(`OpenRouter model must be free: ${model}`);
   }
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -231,7 +242,7 @@ async function callOpenRouter(
       'X-Title': 'Study Hub',
     },
     body: JSON.stringify({
-      model: OPENROUTER_MODEL,
+      model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent },
@@ -290,11 +301,13 @@ export async function llmGenerate(
 
   // Prefer the configured OpenRouter free model. Provider errors fall through.
   if (!options.forceGemini && OPENROUTER_API_KEY) {
-    try {
-      const text = await callOpenRouter(systemPrompt, userContent, options);
-      return { text, provider: 'openrouter' };
-    } catch (error) {
-      console.error('[LLM] OpenRouter error, falling back to Groq:', error);
+    for (const model of OPENROUTER_MODEL_LIST) {
+      try {
+        const text = await callOpenRouter(systemPrompt, userContent, model, options);
+        return { text, provider: 'openrouter' };
+      } catch (error) {
+        console.error(`[LLM] OpenRouter model ${model} failed, trying the next provider:`, error);
+      }
     }
   }
 
