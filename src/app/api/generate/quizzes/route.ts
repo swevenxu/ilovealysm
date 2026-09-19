@@ -6,6 +6,7 @@ import { formatSourceItems, parseSourceItems, SourceItem } from '@/lib/testlets'
 import { handleError } from '@/lib/api-utils';
 
 export const dynamic = 'force-dynamic';
+const MAX_GENERATION_CHUNKS = 12;
 
 const QUIZ_SYSTEM_PROMPT = `You are a quiz generation assistant. Generate quiz questions from the provided study content.
 
@@ -57,7 +58,20 @@ function parseQuizResponse(text: string): Record<string, unknown>[] {
     jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
   }
 
-  const parsed: unknown = JSON.parse(jsonStr);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    const objectStart = jsonStr.indexOf('{');
+    const objectEnd = jsonStr.lastIndexOf('}');
+    if (objectStart < 0 || objectEnd <= objectStart) return [];
+
+    try {
+      parsed = JSON.parse(jsonStr.slice(objectStart, objectEnd + 1));
+    } catch {
+      return [];
+    }
+  }
   const questions = Array.isArray(parsed)
     ? parsed
     : parsed && typeof parsed === 'object' && 'questions' in parsed && Array.isArray(parsed.questions)
@@ -116,6 +130,7 @@ export async function POST(request: NextRequest) {
     let currentItems: SourceItem[] = [];
     let currentPages: number[] = [];
 
+    let processedChunks = 0;
     for (let i = 0; i < sourceItems.length; i++) {
       const item = sourceItems[i];
       currentItems.push(item);
@@ -124,11 +139,17 @@ export async function POST(request: NextRequest) {
       const serializedItems = formatSourceItems(currentItems);
       const isLast = i === sourceItems.length - 1;
       if ((serializedItems.length > 6000 || currentItems.length >= 3 || isLast) && serializedItems.trim()) {
+        processedChunks++;
+        if (processedChunks > MAX_GENERATION_CHUNKS) break;
         try {
           const result = await llmGenerate(QUIZ_SYSTEM_PROMPT,
-            `Generate quiz questions from these complete source items. Preserve each item's stem and sub_questions together:\n\n${serializedItems}`, { temperature: 0.5, jsonMode: true });
+            `Generate 3-5 quiz questions from these complete source items. Return compact valid JSON only. Preserve each item's stem and sub_questions together:\n\n${serializedItems}`, { temperature: 0.5, maxTokens: 2500, jsonMode: true });
 
           const quizData = parseQuizResponse(result.text);
+
+          if (quizData.length === 0) {
+            lastGenerationError = 'The AI returned invalid JSON for one chunk.';
+          }
 
           const quizRows = quizData.map((q) => {
             const question = q.question as string;
