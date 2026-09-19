@@ -1,5 +1,5 @@
 /**
- * LLM client with Groq primary + Gemini fallback.
+ * LLM client with Gemini primary → OpenRouter → Groq fallback.
  *
  * Handles:
  * - Rate limit detection (HTTP 429) and automatic failover
@@ -65,7 +65,7 @@ function cleanupWindow() {
   rateLimitState.requests = rateLimitState.requests.filter(
     (timestamp) => timestamp > oneDayAgo
   );
-  
+
   // Keep only tokens from the last minute
   rateLimitState.tokens = rateLimitState.tokens.filter(
     (timestamp) => timestamp > oneMinuteAgo
@@ -79,11 +79,11 @@ function getCurrentUsage() {
   cleanupWindow();
   const now = Date.now();
   const oneMinuteAgo = now - 60_000;
-  
+
   const requestsThisMinute = rateLimitState.requests.filter(
     (timestamp) => timestamp > oneMinuteAgo
   ).length;
-  
+
   const tokensThisMinute = rateLimitState.tokens.length;
   const requestsToday = rateLimitState.requests.length;
 
@@ -101,12 +101,12 @@ function recordUsage(tokenCount: number) {
   const now = Date.now();
   rateLimitState.requests.push(now);
   rateLimitState.tokens.push(now);
-  
+
   // Add multiple entries for token count (simpler than tracking counts)
   for (let i = 1; i < tokenCount; i++) {
     rateLimitState.tokens.push(now);
   }
-  
+
   cleanupWindow();
 }
 
@@ -115,7 +115,7 @@ function recordUsage(tokenCount: number) {
  */
 function canUseGroq(estimatedTokens: number): boolean {
   const now = Date.now();
-  
+
   // Check cooldown
   if (!groqAvailable && now < groqCooldownUntil) {
     return false;
@@ -126,7 +126,7 @@ function canUseGroq(estimatedTokens: number): boolean {
   if (!GROQ_API_KEY) return false;
 
   const usage = getCurrentUsage();
-  
+
   // Check limits
   if (usage.requestsThisMinute >= GROQ_MAX_RPM) return false;
   if (usage.tokensThisMinute + estimatedTokens > GROQ_MAX_TPM) return false;
@@ -141,12 +141,12 @@ function canUseGroq(estimatedTokens: number): boolean {
 function estimateTokens(text: string): number {
   // Base estimation: ~4 chars per token
   let estimate = Math.ceil(text.length / CHARS_PER_TOKEN);
-  
+
   // Adjust for common patterns
   const words = text.split(/\s+/).length;
   const codeBlocks = (text.match(/```/g) || []).length / 2;
   const jsonContent = text.includes('{') && text.includes('}');
-  
+
   // Code and JSON tend to have more tokens per character
   if (codeBlocks > 0) {
     estimate *= 1.2;
@@ -154,10 +154,10 @@ function estimateTokens(text: string): number {
   if (jsonContent) {
     estimate *= 1.1;
   }
-  
+
   // Words-based validation (typically 1.3 tokens per word)
   const wordBasedEstimate = Math.ceil(words * 1.3);
-  
+
   // Use the higher estimate to be safe
   return Math.max(estimate, wordBasedEstimate);
 }
@@ -195,7 +195,7 @@ async function callGroq(
 
   const content = response.choices[0]?.message?.content || '';
   const estimatedTokenCount = estimateTokens(systemPrompt + userContent + content);
-  
+
   // Record usage in sliding window
   recordUsage(estimatedTokenCount);
 
@@ -203,7 +203,7 @@ async function callGroq(
 }
 
 // ============================================================
-// Gemini client (fallback)
+// Gemini client (primary)
 // ============================================================
 
 async function callGemini(
@@ -215,13 +215,17 @@ async function callGemini(
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
   const model = genAI.getGenerativeModel({
-    model: options.geminiModel || 'gemini-2.5-flash',
+    model: options.geminiModel || process.env.GEMINI_MODEL || 'gemini-3.6-flash',
     systemInstruction: systemPrompt,
   });
 
   const result = await model.generateContent(userContent);
   return result.response.text();
 }
+
+// ============================================================
+// OpenRouter client (secondary)
+// ============================================================
 
 async function callOpenRouter(
   systemPrompt: string,
@@ -280,15 +284,14 @@ export interface LLMOptions {
 }
 
 /**
- * Send a prompt to the LLM with automatic Groq → Gemini failover.
+ * Send a prompt to the LLM with automatic provider failover.
  *
- * Uses OpenRouter's configured free model first, then Groq and Gemini fallback.
- * Falls back to Gemini when:
- * - Groq rate limit is hit (429)
- * - Groq's RPM/TPM/RPD limits are reached
- * - forceGemini option is set
- * 
- * Includes exponential backoff retry logic for transient failures.
+ * Order:
+ *   1. Gemini (primary)
+ *   2. OpenRouter free models (secondary)
+ *   3. Groq (tertiary)
+ *
+ * If `options.forceGemini` is set, only Gemini is used.
  */
 export async function llmGenerate(
   systemPrompt: string,
@@ -299,62 +302,93 @@ export async function llmGenerate(
   // Output is roughly same size as input for reformatting tasks
   const estimatedTotalTokens = inputTokens * 2;
 
-  // Prefer the configured OpenRouter free model. Provider errors fall through.
-  if (!options.forceGemini && OPENROUTER_API_KEY) {
-    for (const model of OPENROUTER_MODEL_LIST) {
-      try {
-        const text = await callOpenRouter(systemPrompt, userContent, model, options);
-        return { text, provider: 'openrouter' };
-      } catch (error) {
-        console.error(`[LLM] OpenRouter model ${model} failed, trying the next provider:`, error);
-      }
-    }
-  }
+  const failures: string[] = [];
 
-  // Try Groq first with retry logic
-  if (!options.forceGemini && canUseGroq(estimatedTotalTokens)) {
-    const maxRetries = 2;
-    
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        const text = await callGroq(systemPrompt, userContent, options);
-        return { text, provider: 'groq' };
-      } catch (error) {
-        // If rate limited, mark Groq as unavailable and fallback
-        const err = error as { status?: number; statusCode?: number; message?: string };
-        
-        if (err?.status === 429 || err?.statusCode === 429) {
-          console.warn('[LLM] Groq rate limited, falling back to Gemini');
-          groqAvailable = false;
-          groqCooldownUntil = Date.now() + 60_000; // 1 minute cooldown
-          break; // Don't retry, go to Gemini
-        }
-        
-        // For other errors, retry with exponential backoff
-        if (attempt < maxRetries) {
-          const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
-          console.warn(`[LLM] Groq error, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        } else {
-          console.error('[LLM] Groq error after retries:', error);
-          // Fall through to Gemini
-        }
-      }
-    }
-  }
-
-  // Fallback to Gemini
+  // ---------- 1. Gemini (primary) ----------
   if (GEMINI_API_KEY) {
     try {
       const text = await callGemini(systemPrompt, userContent, options);
       return { text, provider: 'gemini' };
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       console.error('[LLM] Gemini error:', error);
-      throw new Error('Both Groq and Gemini failed. Please try again later.');
+      failures.push(`Gemini: ${msg.slice(0, 200)}`);
+      if (options.forceGemini) {
+        throw new Error(`Gemini failed (forceGemini=true): ${msg}`);
+      }
+    }
+  } else if (options.forceGemini) {
+    throw new Error('forceGemini requested but GEMINI_API_KEY is not set.');
+  }
+
+  // ---------- 2. OpenRouter free models (secondary) ----------
+  if (OPENROUTER_API_KEY) {
+    for (const model of OPENROUTER_MODEL_LIST) {
+      try {
+        const text = await callOpenRouter(systemPrompt, userContent, model, options);
+        return { text, provider: 'openrouter' };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[LLM] OpenRouter model ${model} failed, trying the next provider:`, error);
+        failures.push(`OpenRouter(${model}): ${msg.slice(0, 200)}`);
+
+        // Account-wide daily free-tier quota: trying more free models is pointless.
+        if (
+          msg.includes('openrouter_free_tier_daily') ||
+          msg.includes('free-models-per-day')
+        ) {
+          console.warn(
+            '[LLM] OpenRouter free daily quota exhausted; skipping remaining OpenRouter models.'
+          );
+          break;
+        }
+      }
     }
   }
 
-  throw new Error('No LLM API keys configured. Set GROQ_API_KEY or GEMINI_API_KEY in .env.local');
+  // ---------- 3. Groq (tertiary) ----------
+  if (canUseGroq(estimatedTotalTokens)) {
+    const maxRetries = 2;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const text = await callGroq(systemPrompt, userContent, options);
+        return { text, provider: 'groq' };
+      } catch (error) {
+        const err = error as { status?: number; statusCode?: number; message?: string };
+
+        if (err?.status === 429 || err?.statusCode === 429) {
+          console.warn('[LLM] Groq rate limited.');
+          groqAvailable = false;
+          groqCooldownUntil = Date.now() + 60_000; // 1 minute cooldown
+          failures.push('Groq: rate limited (429)');
+          break;
+        }
+
+        if (attempt < maxRetries) {
+          const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+          console.warn(
+            `[LLM] Groq error, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        } else {
+          const msg = err?.message || String(error);
+          console.error('[LLM] Groq error after retries:', error);
+          failures.push(`Groq: ${msg.slice(0, 200)}`);
+        }
+      }
+    }
+  } else if (!GROQ_API_KEY) {
+    failures.push('Groq: no API key configured');
+  } else {
+    failures.push('Groq: skipped (rate limit window full or in cooldown)');
+  }
+
+  // ---------- All providers failed ----------
+  const detail = failures.length ? ` Tried: ${failures.join(' | ')}` : '';
+  throw new Error(
+    `All LLM providers failed (Gemini → OpenRouter → Groq).${detail}`
+  );
 }
 
 /**
@@ -400,6 +434,7 @@ export function getRateLimitStatus() {
     groqMaxRPD: GROQ_MAX_RPD,
     hasGroqKey: !!GROQ_API_KEY,
     hasGeminiKey: !!GEMINI_API_KEY,
+    hasOpenRouterKey: !!OPENROUTER_API_KEY,
     percentRPM: Math.round((usage.requestsThisMinute / GROQ_MAX_RPM) * 100),
     percentTPM: Math.round((usage.tokensThisMinute / GROQ_MAX_TPM) * 100),
     percentRPD: Math.round((usage.requestsToday / GROQ_MAX_RPD) * 100),
