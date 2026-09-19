@@ -1,0 +1,670 @@
+/**
+ * UI Fixes for Study Hub
+ * Comprehensive overflow, responsive, and layout fixes
+ */
+
+/* ============================================================
+   Global Overflow Fixes
+   ============================================================ */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  overflow-x: hidden;
+}
+
+body {
+  overflow-x: hidden;
+  width: 100%;
+}
+
+/* ============================================================
+   Main Content Area Fixes
+   ============================================================ */
+
+.main-content {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  min-width: 0; /* Allow flex child to shrink */
+}
+
+.page-container {
+  width: 100%;
+  max-width: 1400px;
+  overflow-x: hidden;
+  min-width: 0;
+}
+
+/* ============================================================
+   Cards and Glass Components
+   ============================================================ */
+
+.glass-card,
+.stat-card {
+  max-width: 100%;
+  overflow: hidden;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.glass-card > * {
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* ============================================================
+   Stat Card Responsive
+   ============================================================ */
+
+.stat-card .stat-value {
+  word-break: break-word;
+}
+
+/* Mastery card responsive */
+.mastery-card {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .mastery-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .mastery-card > div:last-child {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+/* ============================================================
+   File Browser Fixes
+   ============================================================ */
+
+.file-info {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.file-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-item {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .file-item {
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+
+  .file-icon {
+    width: 36px;
+    height: 36px;
+    font-size: var(--text-sm);
+  }
+
+  .file-meta {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+}
+
+/* ============================================================
+   Quiz Page Fixes
+   ============================================================ */
+
+.quiz-generation-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+  column-gap: var(--space-8);
+  row-gap: var(--space-4);
+  align-items: center;
+}
+
+.quiz-generation-copy {
+  min-width: 0;
+}
+
+.quiz-gen-row {
+  min-width: 0;
+  margin-top: 0 !important;
+}
+
+.quiz-gen-row > div:first-child {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.quiz-generation-status {
+  grid-column: 1 / -1;
+}
+
+.quiz-option {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+}
+
+.quiz-option span {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.quiz-card {
+  min-width: 0;
+}
+
+.quiz-card-question {
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.todo-draft-fields {
+  min-width: 0;
+}
+
+.todo-page {
+  max-width: 980px;
+}
+
+.todo-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.todo-stat-card {
+  padding: var(--space-5);
+}
+
+.todo-stat-card .stat-value {
+  font-size: var(--text-2xl);
+}
+
+.todo-composer,
+.todo-list,
+.todo-toolbar {
+  width: 100%;
+  max-width: none !important;
+}
+
+.todo-composer input,
+.todo-composer select,
+.todo-toolbar input,
+.todo-toolbar select {
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 640px) {
+  .todo-draft-fields {
+    grid-template-columns: 1fr !important;
+  }
+
+  .todo-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.flashcard-inner {
+  max-width: 100%;
+}
+
+.flashcard-text {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+}
+
+/* Quiz session card responsive */
+@media (max-width: 640px) {
+  .quiz-generation-card {
+    display: block;
+    min-height: 0 !important;
+    height: auto !important;
+    padding: var(--space-4) !important;
+  }
+
+  .quiz-generation-copy {
+    margin-bottom: var(--space-5);
+  }
+
+  .quiz-generation-card .quiz-gen-row {
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  .quiz-generation-card .quiz-gen-row > div:last-child {
+    width: 100%;
+  }
+
+  .quiz-generation-card .quiz-gen-row > div:last-child button {
+    flex: 1 1 140px;
+  }
+
+  .quiz-subject-select {
+    min-width: 0 !important;
+    width: 100%;
+  }
+
+  .quiz-quick-start {
+    gap: var(--space-2) !important;
+    margin-bottom: var(--space-6) !important;
+  }
+
+  .quiz-quick-start .btn {
+    flex: 1 1 140px;
+  }
+
+  .quiz-gen-row > div:first-child select {
+    min-width: 0 !important;
+    width: 100%;
+  }
+
+  .flashcard-face {
+    min-height: 240px;
+    padding: var(--space-5);
+  }
+
+  .flashcard-text {
+    font-size: var(--text-base);
+  }
+
+  .todo-composer form > div:first-child {
+    align-items: stretch !important;
+  }
+
+  .todo-composer #todo-title {
+    min-width: 0 !important;
+    width: 100%;
+  }
+
+  .todo-composer form > div:first-child button {
+    align-self: flex-start;
+  }
+}
+
+/* ============================================================
+   Search and Input Fixes
+   ============================================================ */
+
+.search-input-wrapper {
+  max-width: 100%;
+  width: 100%;
+}
+
+.search-input-wrapper input {
+  width: 100%;
+  min-width: 0;
+  padding-left: var(--space-10) !important;
+}
+
+/* ============================================================
+   Responsive Grid Fixes
+   ============================================================ */
+
+.grid-2, .grid-3, .grid-4 {
+  width: 100%;
+  max-width: 100%;
+}
+
+@media (max-width: 1200px) {
+  .grid-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .grid-3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .grid-4, .grid-3, .grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   Progress Page — 2-Column Layout Fix
+   ============================================================ */
+
+@media (max-width: 900px) {
+  .progress-split-layout {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ============================================================
+   Table Overflow Fixes
+   ============================================================ */
+
+.data-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.data-table {
+  min-width: 600px;
+  width: 100%;
+}
+
+/* ============================================================
+   Modal Fixes
+   ============================================================ */
+
+.modal-content {
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ============================================================
+   Button Group Fixes
+   ============================================================ */
+
+.btn-group {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Buttons should shrink on small screens */
+@media (max-width: 480px) {
+  .btn-lg {
+    padding: var(--space-3) var(--space-5);
+    font-size: var(--text-sm);
+  }
+
+  .btn {
+    font-size: var(--text-xs);
+  }
+}
+
+/* ============================================================
+   Long Text Handling
+   ============================================================ */
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.break-words {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.break-all {
+  word-break: break-all;
+}
+
+/* ============================================================
+   Sidebar Responsive Fixes — Mobile Hamburger
+   ============================================================ */
+
+.mobile-menu-btn {
+  display: none;
+  position: fixed;
+  top: var(--space-4);
+  left: var(--space-4);
+  z-index: 30;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  transition: background var(--transition-fast);
+}
+
+.mobile-menu-btn:hover {
+  background: var(--bg-hover);
+}
+
+.mobile-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 19;
+}
+
+@media (max-width: 768px) {
+  .mobile-menu-btn {
+    display: flex;
+  }
+
+  .sidebar {
+    width: 280px;
+    max-width: 280px;
+    transform: translateX(-100%);
+    transition: transform var(--transition-base);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .mobile-overlay.open {
+    display: block;
+  }
+
+  .main-content {
+    margin-left: 0;
+    width: 100%;
+    padding-top: 60px; /* Space for hamburger button */
+  }
+
+  .page-container {
+    padding: var(--space-4);
+  }
+
+  .page-title {
+    font-size: var(--text-xl);
+  }
+
+  .page-subtitle {
+    font-size: var(--text-sm);
+  }
+}
+
+@media (max-width: 480px) {
+  .page-container {
+    padding: var(--space-3);
+  }
+
+  .stat-card {
+    padding: var(--space-4);
+  }
+
+  .stat-card .stat-value {
+    font-size: var(--text-2xl);
+  }
+}
+
+/* ============================================================
+   Upload / Scan Page Responsive
+   ============================================================ */
+
+@media (max-width: 640px) {
+  .dropzone {
+    padding: var(--space-8);
+  }
+
+  .dropzone-icon {
+    font-size: 2rem;
+  }
+}
+
+/* ============================================================
+   Select Wrapper Responsive
+   ============================================================ */
+
+.select-wrapper {
+  min-width: 0;
+}
+
+.select-wrapper select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  .select-wrapper select {
+    font-size: var(--text-xs);
+    padding: var(--space-2) var(--space-3);
+  }
+}
+
+/* ============================================================
+   Prevent Specific Element Overflow
+   ============================================================ */
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+p {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+}
+
+pre {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+code {
+  word-break: break-all;
+}
+
+/* ============================================================
+   Flex layout helpers for inline form rows
+   ============================================================ */
+
+@media (max-width: 640px) {
+  /* Quiz generation form stacks vertically */
+  .quiz-gen-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .quiz-gen-row select {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  /* Scan page header stacks */
+  .scan-header-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: var(--space-3) !important;
+  }
+
+  /* Filter rows stack */
+  .filter-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .filter-row .search-input-wrapper {
+    max-width: 100% !important;
+  }
+}
+
+/* ============================================================
+   Utility Classes
+   ============================================================ */
+
+.overflow-hidden {
+  overflow: hidden;
+}
+
+.overflow-x-hidden {
+  overflow-x: hidden;
+}
+
+.overflow-y-auto {
+  overflow-y: auto;
+}
+
+.overflow-x-auto {
+  overflow-x: auto;
+}
+
+.max-w-full {
+  max-width: 100%;
+}
+
+.w-full {
+  width: 100%;
+}
+
+/* ============================================================
+   Badge overflow fix
+   ============================================================ */
+
+.badge {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.chip {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   Verification page grid fix for small screens
+   ============================================================ */
+
+@media (max-width: 640px) {
+  .tooltip::before {
+    display: none; /* Tooltips don't work well on touch */
+  }
+}
+
+/* ============================================================
+   File Detail Page Responsive
+   ============================================================ */
+
+@media (max-width: 640px) {
+  .tabs {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+}
