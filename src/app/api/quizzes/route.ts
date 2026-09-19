@@ -48,7 +48,10 @@ export async function GET() {
       return { ...rest, file, topic };
     });
 
-    return NextResponse.json({ quizzes: shaped });
+    return NextResponse.json(
+      { quizzes: shaped },
+      { headers: { 'Cache-Control': 'no-store, max-age=0' } },
+    );
   } catch (error) {
     const { message } = handleError(error);
     return errorResponse(message, 500);

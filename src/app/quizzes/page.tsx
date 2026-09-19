@@ -86,7 +86,10 @@ export default function QuizzesPage() {
 
   async function loadQuizzes() {
     try {
-      const res = await fetch('/api/quizzes', { signal: AbortSignal.timeout(5000) });
+      const res = await fetch(`/api/quizzes?refresh=${Date.now()}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(5000),
+      });
       if (res.ok) {
         const data = await res.json();
         setQuizzes(data.quizzes || []);
@@ -101,8 +104,8 @@ export default function QuizzesPage() {
   async function loadGenerationSource() {
     try {
       const [filesRes, topicsRes] = await Promise.all([
-        fetch('/api/files', { signal: AbortSignal.timeout(5000) }),
-        fetch('/api/topics', { signal: AbortSignal.timeout(5000) }),
+        fetch(`/api/files?refresh=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(5000) }),
+        fetch(`/api/topics?refresh=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(5000) }),
       ]);
       const filesData = await filesRes.json();
       const topicsData = await topicsRes.json();
