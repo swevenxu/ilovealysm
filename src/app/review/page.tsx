@@ -1,6 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import {
+    ChevronLeft,
+    ChevronRight,
+    CheckCircle2,
+    XCircle,
+    RotateCcw,
+} from 'lucide-react';
 
 interface Option {
     label: string;
@@ -30,42 +38,6 @@ interface Group {
     questions: ReviewQuestion[];
 }
 
-const pageStyle: React.CSSProperties = {
-    padding: '32px',
-    maxWidth: '840px',
-    margin: '0 auto',
-};
-
-const h1Style: React.CSSProperties = {
-    fontSize: '24px',
-    fontWeight: 600,
-    marginBottom: '8px',
-    color: 'var(--text-primary, #111)',
-};
-
-const subStyle: React.CSSProperties = {
-    fontSize: '13px',
-    color: 'var(--text-muted, #666)',
-    marginBottom: '24px',
-};
-
-const groupBtnStyle: React.CSSProperties = {
-    width: '100%',
-    textAlign: 'left',
-    padding: '16px',
-    border: '1px solid var(--border, #e5e5e5)',
-    borderRadius: '8px',
-    background: 'var(--surface, #fff)',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: '10px',
-    fontFamily: 'inherit',
-    fontSize: '14px',
-    color: 'var(--text-primary, #111)',
-};
-
 export default function ReviewPage() {
     const [groups, setGroups] = useState<Group[]>([]);
     const [loading, setLoading] = useState(true);
@@ -87,22 +59,7 @@ export default function ReviewPage() {
         load();
     }, []);
 
-    if (loading) {
-        return <div style={pageStyle}>Loading…</div>;
-    }
-
     const total = groups.reduce((s, g) => s + g.count, 0);
-
-    if (total === 0) {
-        return (
-            <div style={pageStyle}>
-                <h1 style={h1Style}>Review</h1>
-                <p style={{ color: 'var(--text-muted, #666)' }}>
-                    Nothing to review right now. Anything you get wrong on a quiz will show up here.
-                </p>
-            </div>
-        );
-    }
 
     if (selectedTopic) {
         const group = groups.find((g) => g.topic_id === selectedTopic);
@@ -119,38 +76,105 @@ export default function ReviewPage() {
     }
 
     return (
-        <div style={pageStyle}>
-            <h1 style={h1Style}>Review</h1>
-            <p style={subStyle}>
-                {total} wrong {total === 1 ? 'answer' : 'answers'} across {groups.length}{' '}
-                {groups.length === 1 ? 'subject' : 'subjects'}
-            </p>
-
-            <div>
-                {groups.map((g) => (
-                    <button
-                        key={g.topic_id}
-                        onClick={() => setSelectedTopic(g.topic_id)}
-                        style={groupBtnStyle}
-                    >
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span
-                                style={{
-                                    display: 'inline-block',
-                                    width: '10px',
-                                    height: '10px',
-                                    borderRadius: '50%',
-                                    background: g.topic_color,
-                                }}
-                            />
-                            <span style={{ fontWeight: 500 }}>{g.topic_name}</span>
-                        </span>
-                        <span style={{ fontSize: '13px', color: 'var(--text-muted, #666)' }}>
-                            {g.count} to review →
-                        </span>
-                    </button>
-                ))}
+        <div className="page-container">
+            <div className="page-header">
+                <h1 className="page-title">Review</h1>
             </div>
+
+            {loading ? (
+                <div className="grid grid-2">
+                    {[1, 2, 3, 4].map((i) => (
+                        <div key={i} className="glass-card" style={{ padding: 'var(--space-6)' }}>
+                            <div className="skeleton" style={{ width: '60%', height: 16, marginBottom: 12 }} />
+                            <div className="skeleton" style={{ width: '40%', height: 12 }} />
+                        </div>
+                    ))}
+                </div>
+            ) : total === 0 ? (
+                <div className="empty-state glass-card animate-in animate-in-1">
+                    <div className="empty-state-title">Nothing to review</div>
+                    <div className="empty-state-description">
+                        Anything you get wrong on a quiz will show up here. Take a quiz session and come back.
+                    </div>
+                    <Link href="/quizzes" className="btn btn-primary">
+                        Go to Quizzes
+                    </Link>
+                </div>
+            ) : (
+                <>
+                    <p
+                        style={{
+                            fontSize: 'var(--text-sm)',
+                            color: 'var(--text-tertiary)',
+                            marginBottom: 'var(--space-6)',
+                        }}
+                    >
+                        {total} wrong {total === 1 ? 'answer' : 'answers'} across {groups.length}{' '}
+                        {groups.length === 1 ? 'subject' : 'subjects'}
+                    </p>
+
+                    <div className="grid grid-2 animate-in animate-in-1">
+                        {groups.map((g) => (
+                            <button
+                                key={g.topic_id}
+                                onClick={() => setSelectedTopic(g.topic_id)}
+                                className="glass-card quiz-card"
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: 'var(--space-4)',
+                                    textAlign: 'left',
+                                    width: '100%',
+                                    font: 'inherit',
+                                    color: 'inherit',
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 'var(--space-3)',
+                                        minWidth: 0,
+                                    }}
+                                >
+                                    <span
+                                        style={{
+                                            display: 'inline-block',
+                                            width: 10,
+                                            height: 10,
+                                            borderRadius: '50%',
+                                            background: g.topic_color,
+                                            flexShrink: 0,
+                                        }}
+                                    />
+                                    <span
+                                        style={{
+                                            fontFamily: 'var(--font-heading)',
+                                            fontWeight: 700,
+                                            fontSize: 'var(--text-base)',
+                                        }}
+                                    >
+                                        {g.topic_name}
+                                    </span>
+                                </div>
+                                <span
+                                    style={{
+                                        fontSize: 'var(--text-xs)',
+                                        color: 'var(--text-tertiary)',
+                                        whiteSpace: 'nowrap',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 'var(--space-1)',
+                                    }}
+                                >
+                                    {g.count} to review <ChevronRight size={14} />
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+                </>
+            )}
         </div>
     );
 }
@@ -171,9 +195,10 @@ function ReviewSession({
     const [score, setScore] = useState({ right: 0, wrong: 0 });
 
     const q = questions[index];
+    const complete = index >= questions.length;
 
     async function submit(opt: Option) {
-        if (revealed || answering) return;
+        if (revealed || answering || !q) return;
         setSelected(opt.text);
         setRevealed(true);
         setAnswering(true);
@@ -203,209 +228,205 @@ function ReviewSession({
         setIndex((i) => i + 1);
     }
 
-    if (index >= questions.length) {
-        return (
-            <div style={pageStyle}>
-                <h1 style={h1Style}>Review complete</h1>
-                <p style={{ color: 'var(--text-primary, #111)' }}>
-                    {title}: {score.right} right, {score.wrong} wrong out of {questions.length}.
-                </p>
-                <button
-                    onClick={onExit}
-                    style={{
-                        marginTop: '24px',
-                        padding: '10px 18px',
-                        background: 'var(--accent, #111)',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontSize: '14px',
-                    }}
-                >
-                    Back to Review
-                </button>
-            </div>
-        );
-    }
-
     return (
-        <div style={pageStyle}>
+        <div className="page-container">
+            {/* Progress Bar */}
             <div
                 style={{
-                    marginBottom: '24px',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
+                    gap: 'var(--space-4)',
+                    marginBottom: 'var(--space-6)',
                 }}
             >
-                <div>
-                    <h1
-                        style={{
-                            fontSize: '20px',
-                            fontWeight: 600,
-                            margin: 0,
-                            color: 'var(--text-primary, #111)',
-                        }}
-                    >
-                        {title}
-                    </h1>
-                    <p
-                        style={{
-                            fontSize: '13px',
-                            color: 'var(--text-muted, #666)',
-                            margin: '4px 0 0',
-                        }}
-                    >
-                        {index + 1} of {questions.length}
-                    </p>
+                <button className="btn btn-ghost" onClick={onExit}>
+                    <ChevronLeft size={16} /> Exit
+                </button>
+                <div style={{ flex: 1 }}>
+                    <div className="progress-bar-track">
+                        <div
+                            className="progress-bar-fill"
+                            style={{
+                                width: `${(Math.min(index + (revealed ? 1 : 0), questions.length) / questions.length) * 100}%`,
+                            }}
+                        />
+                    </div>
                 </div>
-                <button
-                    onClick={onExit}
+                <span
                     style={{
-                        fontSize: '13px',
-                        color: 'var(--text-muted, #666)',
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 'var(--text-sm)',
+                        color: 'var(--text-secondary)',
                     }}
                 >
-                    Exit
-                </button>
+                    {Math.min(index + 1, questions.length)}/{questions.length}
+                </span>
             </div>
 
-            {q.is_testlet && q.stem && (
+            {/* Complete */}
+            {complete && (
                 <div
+                    className="glass-card animate-in animate-in-1"
                     style={{
-                        marginBottom: '16px',
-                        padding: '16px',
-                        background: 'var(--surface-muted, #f7f7f7)',
-                        borderRadius: '8px',
-                        fontSize: '14px',
-                        whiteSpace: 'pre-wrap',
-                        color: 'var(--text-primary, #111)',
+                        padding: 'var(--space-10)',
+                        textAlign: 'center',
+                        maxWidth: 640,
+                        margin: '0 auto',
                     }}
                 >
-                    {q.stem}
-                </div>
-            )}
-
-            <p
-                style={{
-                    fontSize: '17px',
-                    marginBottom: '20px',
-                    whiteSpace: 'pre-wrap',
-                    color: 'var(--text-primary, #111)',
-                }}
-            >
-                {q.question_text}
-            </p>
-
-            {q.options && (
-                <div>
-                    {q.options.map((o) => {
-                        const isPicked = selected === o.text;
-                        let bg = 'var(--surface, #fff)';
-                        let border = '1px solid var(--border, #e5e5e5)';
-                        let opacity = 1;
-
-                        if (revealed) {
-                            if (o.is_correct) {
-                                bg = '#f0fdf4';
-                                border = '1px solid #16a34a';
-                            } else if (isPicked) {
-                                bg = '#fef2f2';
-                                border = '1px solid #dc2626';
-                            } else {
-                                opacity = 0.5;
-                            }
-                        }
-
-                        return (
-                            <button
-                                key={o.label}
-                                onClick={() => submit(o)}
-                                disabled={revealed}
-                                style={{
-                                    display: 'block',
-                                    width: '100%',
-                                    textAlign: 'left',
-                                    padding: '14px 16px',
-                                    marginBottom: '8px',
-                                    background: bg,
-                                    border,
-                                    borderRadius: '8px',
-                                    cursor: revealed ? 'default' : 'pointer',
-                                    opacity,
-                                    fontSize: '14px',
-                                    fontFamily: 'inherit',
-                                    color: 'var(--text-primary, #111)',
-                                }}
-                            >
-                                <span style={{ fontWeight: 600, marginRight: '8px' }}>
-                                    {o.label}.
-                                </span>
-                                {o.text}
-                            </button>
-                        );
-                    })}
-                </div>
-            )}
-
-            {revealed && (
-                <div
-                    style={{
-                        marginTop: '20px',
-                        padding: '16px',
-                        background: 'var(--surface-muted, #f7f7f7)',
-                        borderRadius: '8px',
-                    }}
-                >
-                    <p style={{ fontWeight: 600, marginBottom: '8px', fontSize: '14px' }}>
-                        Explanation
-                    </p>
-                    <p
+                    <h2
                         style={{
-                            fontSize: '13px',
-                            whiteSpace: 'pre-wrap',
-                            color: 'var(--text-primary, #111)',
-                            margin: 0,
+                            fontSize: 'var(--text-2xl)',
+                            fontWeight: 700,
+                            marginBottom: 'var(--space-2)',
                         }}
                     >
-                        {q.explanation || 'No explanation provided.'}
+                        Review Complete!
+                    </h2>
+                    <p
+                        style={{
+                            fontSize: 'var(--text-4xl)',
+                            fontWeight: 800,
+                            fontFamily: 'var(--font-mono)',
+                            color:
+                                score.right / questions.length >= 0.8
+                                    ? 'var(--accent-emerald)'
+                                    : 'var(--accent-amber)',
+                        }}
+                    >
+                        {score.right}/{questions.length}
                     </p>
-                    {q.source_quote && (
-                        <p
+                    <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-6)' }}>
+                        {Math.round((score.right / questions.length) * 100)}% correct on {title}
+                    </p>
+                    <button className="btn btn-primary" onClick={onExit}>
+                        <RotateCcw size={16} /> Back to Review
+                    </button>
+                </div>
+            )}
+
+            {/* Question */}
+            {!complete && q && (
+                <div
+                    className="glass-card animate-in animate-in-1"
+                    style={{ padding: 'var(--space-8)', maxWidth: 720, margin: '0 auto' }}
+                >
+                    <div
+                        style={{
+                            display: 'flex',
+                            gap: 'var(--space-2)',
+                            marginBottom: 'var(--space-4)',
+                        }}
+                    >
+                        <span className="badge badge-processing">Review</span>
+                        {q.difficulty && <span className="badge badge-pending">{q.difficulty}</span>}
+                    </div>
+
+                    <div
+                        className="quiz-card-question"
+                        style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-6)' }}
+                    >
+                        {q.is_testlet && q.stem && (
+                            <div
+                                style={{
+                                    marginBottom: 'var(--space-4)',
+                                    padding: 'var(--space-4)',
+                                    background: 'var(--bg-tertiary)',
+                                    borderRadius: 'var(--radius-lg)',
+                                    color: 'var(--text-secondary)',
+                                    fontSize: 'var(--text-sm)',
+                                    whiteSpace: 'pre-wrap',
+                                }}
+                            >
+                                <strong>Shared scenario:</strong>
+                                {'\n'}
+                                {q.stem}
+                            </div>
+                        )}
+                        {q.question_text}
+                    </div>
+
+                    <div>
+                        {q.options?.map((option, idx) => {
+                            const labels = ['A', 'B', 'C', 'D', 'E'];
+                            let optionClass = 'quiz-option';
+                            if (revealed) {
+                                if (option.is_correct) optionClass += ' correct';
+                                else if (option.text === selected) optionClass += ' incorrect';
+                            } else if (option.text === selected) {
+                                optionClass += ' selected';
+                            }
+
+                            return (
+                                <div
+                                    key={idx}
+                                    className={optionClass}
+                                    onClick={() => !revealed && submit(option)}
+                                >
+                                    <span className="quiz-option-label">{labels[idx]}</span>
+                                    <span>{option.text}</span>
+                                    {revealed && option.is_correct && (
+                                        <CheckCircle2
+                                            size={16}
+                                            style={{ marginLeft: 'auto', color: 'var(--accent-emerald)' }}
+                                        />
+                                    )}
+                                    {revealed && option.text === selected && !option.is_correct && (
+                                        <XCircle
+                                            size={16}
+                                            style={{ marginLeft: 'auto', color: 'var(--accent-rose)' }}
+                                        />
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {revealed && q.explanation && (
+                        <div
                             style={{
-                                marginTop: '12px',
-                                fontSize: '12px',
+                                marginTop: 'var(--space-4)',
+                                padding: 'var(--space-4)',
+                                background: 'var(--accent-blue-glow)',
+                                borderRadius: 'var(--radius-lg)',
+                                border: '1px solid rgba(59, 130, 246, 0.2)',
+                                fontSize: 'var(--text-sm)',
+                                color: 'var(--text-secondary)',
+                            }}
+                        >
+                            <strong style={{ color: 'var(--accent-blue-light)' }}>Explanation:</strong>{' '}
+                            {q.explanation}
+                        </div>
+                    )}
+
+                    {revealed && q.source_quote && (
+                        <div
+                            style={{
+                                marginTop: 'var(--space-3)',
+                                fontSize: 'var(--text-xs)',
                                 fontStyle: 'italic',
-                                color: 'var(--text-muted, #666)',
-                                margin: 0,
+                                color: 'var(--text-muted)',
                             }}
                         >
                             &ldquo;{q.source_quote}&rdquo;
-                        </p>
+                        </div>
+                    )}
+
+                    {revealed && (
+                        <div
+                            style={{
+                                marginTop: 'var(--space-6)',
+                                display: 'flex',
+                                justifyContent: 'flex-end',
+                            }}
+                        >
+                            <button className="btn btn-primary" onClick={next}>
+                                {index < questions.length - 1 ? 'Next Question' : 'Finish'}{' '}
+                                <ChevronRight size={16} />
+                            </button>
+                        </div>
                     )}
                 </div>
-            )}
-
-            {revealed && (
-                <button
-                    onClick={next}
-                    style={{
-                        marginTop: '20px',
-                        padding: '10px 18px',
-                        background: 'var(--accent, #111)',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontSize: '14px',
-                    }}
-                >
-                    {index < questions.length - 1 ? 'Next' : 'Finish'}
-                </button>
             )}
         </div>
     );
