@@ -1,14 +1,14 @@
 /**
  * Processing queue for batch file operations.
  *
- * Manages the pipeline: verify → extract → generate quizzes
+ * Manages the verification and extraction pipeline.
  * with rate limiting and progress tracking.
  * 
  * This queue now actually processes jobs by calling the appropriate API endpoints.
  */
 
 export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed';
-export type JobType = 'verify' | 'extract' | 'generate_quizzes';
+export type JobType = 'verify' | 'extract';
 
 export interface QueueJob {
   id: string;
@@ -49,24 +49,6 @@ async function processJob(job: QueueJob): Promise<unknown> {
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.error || 'Verification failed');
-      }
-      
-      return await response.json();
-    }
-    
-    case 'generate_quizzes': {
-      const response = await fetch('/api/generate/quizzes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          fileId: job.fileId,
-          ...(job.options || {}),
-        }),
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Quiz generation failed');
       }
       
       return await response.json();

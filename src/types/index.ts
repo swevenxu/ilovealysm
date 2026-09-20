@@ -134,18 +134,6 @@ export interface VerificationReport {
   warnings?: string[];
 }
 
-export interface GenerateQuizzesRequest {
-  fileId?: string;
-  topicId?: string;
-  format?: 'multiple_choice' | 'flashcard' | 'both';
-  difficulty?: 'easy' | 'medium' | 'hard';
-}
-
-export interface GenerateQuizzesResponse {
-  success: boolean;
-  quizzesGenerated: number;
-}
-
 export interface QuizAttemptRequest {
   quizId: string;
   selectedAnswer: string;

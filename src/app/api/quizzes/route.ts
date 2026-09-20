@@ -58,23 +58,3 @@ export async function GET() {
     return errorResponse(message, 500);
   }
 }
-
-export async function DELETE() {
-  const supabase = getServerSupabase();
-  if (!supabase) return errorResponse('Not configured', 503);
-
-  try {
-    // Only delete AI-generated questions (those tied to an uploaded file).
-    // Static questions have file_id = NULL and are preserved.
-    const { error } = await supabase
-      .from('quizzes')
-      .delete()
-      .not('file_id', 'is', null);
-
-    if (error) return errorResponse(error.message, 500);
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    const { message } = handleError(error);
-    return errorResponse(message, 500);
-  }
-}

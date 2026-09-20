@@ -252,10 +252,12 @@ Built-in intelligent rate limiting:
 ### File Processing Pipeline
 
 ```
-Upload → Verify → Extract → Generate Notes → Generate Quizzes
+Upload → Verify → Extract → Generate Notes
 ```
 
-Each step can be triggered independently or chained via the job queue.
+Quiz questions are loaded from the hardcoded question bank; they are not generated from uploaded files.
+
+Each file-processing step can be triggered independently or chained via the job queue.
 
 ---
 
@@ -433,19 +435,6 @@ Content-Type: application/json
 {
   "fileId": "uuid",      // optional
   "topicId": "uuid"      // optional
-}
-```
-
-**Generate Quizzes**
-```http
-POST /api/generate/quizzes
-Content-Type: application/json
-
-{
-  "fileId": "uuid",
-  "topicId": "uuid",
-  "format": "multiple_choice" | "flashcard" | "both",
-  "difficulty": "easy" | "medium" | "hard"
 }
 ```
 

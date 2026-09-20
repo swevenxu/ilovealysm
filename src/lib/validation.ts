@@ -25,18 +25,6 @@ export const verifyFileSchema = z.object({
   fileId: z.string().uuid('Invalid file ID format'),
 });
 
-// ============================================================
-// Quiz Generation
-// ============================================================
-
-export const generateQuizzesSchema = z.object({
-  fileId: z.string().uuid().optional(),
-  topicId: z.string().uuid().optional(),
-  format: z.enum(['multiple_choice', 'flashcard', 'both']).optional(),
-  difficulty: z.enum(['easy', 'medium', 'hard']).optional(),
-  count: z.number().int().min(1).max(50).optional(),
-});
-
 export const quizAttemptSchema = z.object({
   quizId: z.string().uuid('Invalid quiz ID'),
   selectedAnswer: z.string().min(1, 'Answer is required'),

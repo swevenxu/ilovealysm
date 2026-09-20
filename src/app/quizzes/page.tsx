@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import {
-  BrainCircuit,
   Play,
   Shuffle,
   CheckCircle2,
@@ -11,9 +10,7 @@ import {
   ChevronRight,
   ChevronLeft,
   Layers,
-  Loader2,
 } from 'lucide-react';
-import { PINNACLE_SUBJECTS, isPinnacleFile } from '@/lib/pinnacle';
 
 interface Quiz {
   id: string;
@@ -33,30 +30,9 @@ interface Quiz {
   file?: { filename: string };
 }
 
-interface StudyFile {
-  id: string;
-  filename: string;
-  verification_status: string;
-  page_count: number | null;
-}
-
-interface Topic {
-  id: string;
-  name: string;
-  icon: string;
-}
-
 export default function QuizzesPage() {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sourceLoading, setSourceLoading] = useState(true);
-  const [pinnacleFile, setPinnacleFile] = useState<StudyFile | null>(null);
-  const [topics, setTopics] = useState<Topic[]>([]);
-  const [selectedTopicId, setSelectedTopicId] = useState('');
-  const [generating, setGenerating] = useState(false);
-  const [generationError, setGenerationError] = useState<string | null>(null);
-  const [generationResult, setGenerationResult] = useState<string | null>(null);
-  const [resetting, setResetting] = useState(false);
   const [filterFormat, setFilterFormat] = useState<string>('all');
   const [filterDifficulty, setFilterDifficulty] = useState<string>('all');
   const [sessionActive, setSessionActive] = useState(false);
@@ -70,8 +46,24 @@ export default function QuizzesPage() {
   const [previewFlipIds, setPreviewFlipIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    loadQuizzes();
-    loadGenerationSource();
+    async function loadQuizzes() {
+      try {
+        const res = await fetch(`/api/quizzes?refresh=${Date.now()}`, {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(5000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setQuizzes(data.quizzes || []);
+        }
+      } catch (error) {
+        console.error('Failed to load quizzes:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    void loadQuizzes();
   }, []);
 
   useEffect(() => {
@@ -83,87 +75,6 @@ export default function QuizzesPage() {
     const frame = requestAnimationFrame(() => setFlashcardReadyId(flashcard.id));
     return () => cancelAnimationFrame(frame);
   }, [currentIndex, sessionActive, sessionQuizzes]);
-
-  async function loadQuizzes() {
-    try {
-      const res = await fetch(`/api/quizzes?refresh=${Date.now()}`, {
-        cache: 'no-store',
-        signal: AbortSignal.timeout(5000),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setQuizzes(data.quizzes || []);
-      }
-    } catch (error) {
-      console.error('Failed to load quizzes:', error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadGenerationSource() {
-    try {
-      const [filesRes, topicsRes] = await Promise.all([
-        fetch(`/api/files?refresh=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(5000) }),
-        fetch(`/api/topics?refresh=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(5000) }),
-      ]);
-      const filesData = await filesRes.json();
-      const topicsData = await topicsRes.json();
-      const file = (filesData.files || []).find((item: StudyFile) => isPinnacleFile(item.filename)) || null;
-      const subjectTopics = (topicsData.topics || []).filter((topic: Topic) =>
-        PINNACLE_SUBJECTS.some((subject) => subject.name === topic.name),
-      );
-      setPinnacleFile(file);
-      setTopics(subjectTopics);
-    } catch (error) {
-      console.error('Failed to load quiz generation source:', error);
-      setGenerationError('Unable to load the Pinnacle subjects.');
-    } finally {
-      setSourceLoading(false);
-    }
-  }
-
-  async function generateQuizzes() {
-    if (!pinnacleFile || !selectedTopicId) return;
-    setGenerating(true);
-    setGenerationError(null);
-    setGenerationResult(null);
-    try {
-      const res = await fetch('/api/generate/quizzes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileId: pinnacleFile.id, topicId: selectedTopicId }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Quiz generation failed');
-      setGenerationResult(`${data.quizzesGenerated} questions generated successfully.`);
-      await loadQuizzes();
-    } catch (error) {
-      console.error('Failed to generate quizzes:', error);
-      setGenerationError(error instanceof Error ? error.message : 'Quiz generation failed');
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  async function resetQuizzes() {
-    if (!confirm('Delete all generated quizzes? This cannot be undone.')) return;
-    setResetting(true);
-    setGenerationError(null);
-    setGenerationResult(null);
-    try {
-      const res = await fetch('/api/quizzes', { method: 'DELETE' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Quiz reset failed');
-      setQuizzes([]);
-      setGenerationResult('All generated quizzes were deleted.');
-    } catch (error) {
-      console.error('Failed to reset quizzes:', error);
-      setGenerationError(error instanceof Error ? error.message : 'Quiz reset failed');
-    } finally {
-      setResetting(false);
-    }
-  }
 
   const filteredQuizzes = quizzes.filter((q) => {
     if (filterFormat !== 'all' && q.format !== filterFormat) return false;
@@ -216,7 +127,7 @@ export default function QuizzesPage() {
           time_spent_seconds: 0,
         }),
       });
-    } catch (err) {
+    } catch {
       // Non-critical, don't block UI
     }
   }
@@ -429,93 +340,6 @@ export default function QuizzesPage() {
         <h1 className="page-title">Quizzes</h1>
       </div>
 
-      <div className="glass-card quiz-generation-card animate-in animate-in-1" style={{ padding: 'var(--space-6)', marginBottom: 'var(--space-8)' }}>
-        <div className="quiz-generation-copy">
-          <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 650, marginBottom: 'var(--space-2)' }}>
-            Generate quizzes
-          </h2>
-        </div>
-        <div className="quiz-gen-row" style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-            <label htmlFor="quiz-subject" style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', fontWeight: 600 }}>
-              Subject
-            </label>
-            <select
-              id="quiz-subject"
-              value={selectedTopicId}
-              onChange={(event) => setSelectedTopicId(event.target.value)}
-              disabled={sourceLoading || generating}
-              className="quiz-subject-select"
-              style={{ minWidth: 340, padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)' }}
-            >
-              <option value="">
-                {sourceLoading ? 'Loading subjects...' : 'Select a subject...'}
-              </option>
-              {topics
-                .map((topic) => ({
-                  ...topic,
-                  section: PINNACLE_SUBJECTS.find((subject) => subject.name === topic.name),
-                }))
-                .filter((topic) => topic.section)
-                .sort((a, b) => (a.section?.startPage ?? 0) - (b.section?.startPage ?? 0))
-                .map((topic) => (
-                  <option key={topic.id} value={topic.id}>
-                    {topic.section?.code} — {topic.name} (pages {topic.section?.startPage}–{topic.section?.endPage})
-                  </option>
-                ))}
-            </select>
-          </div>
-          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-            <button
-              className="btn btn-primary"
-              onClick={generateQuizzes}
-              disabled={!pinnacleFile || pinnacleFile.verification_status !== 'readable' || !selectedTopicId || generating || resetting}
-            >
-              {generating ? (
-                <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Generating...</>
-              ) : (
-                <><BrainCircuit size={16} /> Generate Quizzes</>
-              )}
-            </button>
-            <button
-              className="btn btn-danger"
-              onClick={resetQuizzes}
-              disabled={generating || resetting || quizzes.length === 0}
-            >
-              {resetting ? (
-                <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Resetting...</>
-              ) : (
-                'Reset All Quizzes'
-              )}
-            </button>
-          </div>
-        </div>
-        {generating && (
-          <div className="quiz-generation-status" style={{ marginTop: 'var(--space-5)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-4)', marginBottom: 'var(--space-2)' }}>
-              <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>Generating quizzes</span>
-              <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--text-xs)' }}>Processing selected subject...</span>
-            </div>
-            <div className="progress-bar-track" role="progressbar" aria-label="Generating quizzes">
-              <div className="progress-bar-fill progress-bar-fill-indeterminate" />
-            </div>
-            <p style={{ color: 'var(--text-tertiary)', fontSize: 'var(--text-xs)', marginTop: 'var(--space-2)', marginBottom: 0 }}>
-              Large subjects may take several minutes. Keep this page open while the questions are being created.
-            </p>
-          </div>
-        )}
-        {generationResult && (
-          <div className="quiz-generation-status" style={{ marginTop: 'var(--space-4)', color: 'var(--accent-emerald-light)', fontSize: 'var(--text-sm)' }}>
-            {generationResult}
-          </div>
-        )}
-        {generationError && (
-          <div className="quiz-generation-status" style={{ marginTop: 'var(--space-4)', color: 'var(--accent-rose)', fontSize: 'var(--text-sm)' }}>
-            {generationError}
-          </div>
-        )}
-      </div>
-
       {/* Quick Start */}
       <div className="quiz-quick-start animate-in animate-in-1" style={{ display: 'flex', gap: 'var(--space-4)', marginBottom: 'var(--space-8)', flexWrap: 'wrap' }}>
         <button className="btn btn-primary btn-lg" onClick={() => startSession()} disabled={filteredQuizzes.length === 0}>
@@ -565,11 +389,8 @@ export default function QuizzesPage() {
         <div className="empty-state glass-card animate-in animate-in-3">
           <div className="empty-state-title">No quizzes yet</div>
           <div className="empty-state-description">
-            Choose a Pinnacle subject above to generate your first questions.
+            Hardcoded questions will appear here once they have been loaded.
           </div>
-          <button className="btn btn-primary" onClick={() => document.getElementById('quiz-subject')?.focus()}>
-            Choose a Subject
-          </button>
         </div>
       ) : (
         <div className="grid grid-2 animate-in animate-in-3">

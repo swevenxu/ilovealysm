@@ -9,7 +9,6 @@ import {
   AlertTriangle,
   XCircle,
   Clock,
-  BrainCircuit,
   Trash2,
 } from 'lucide-react';
 
@@ -73,7 +72,6 @@ export default function FileDetailPage() {
   const [file, setFile] = useState<FileDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'pages' | 'quizzes'>('pages');
-  const [generating, setGenerating] = useState<'quizzes' | null>(null);
   const [expandedPage, setExpandedPage] = useState<number | null>(null);
 
   useEffect(() => {
@@ -323,12 +321,12 @@ export default function FileDetailPage() {
           <div>
             {file.quizzes.length === 0 ? (
               <div className="empty-state glass-card">
-                <div className="empty-state-title">No quizzes generated yet</div>
+                <div className="empty-state-title">No quizzes for this file</div>
                 <div className="empty-state-description">
-                  Click &ldquo;Generate Quizzes&rdquo; to create questions from this file&apos;s content.
+                  Quiz questions are provided from the hardcoded question bank rather than generated from uploaded files.
                 </div>
                 <Link className="btn btn-primary" href="/quizzes">
-                  <BrainCircuit size={16} /> Open Quizzes
+                  Open Quizzes
                 </Link>
               </div>
             ) : (

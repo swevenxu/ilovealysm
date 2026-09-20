@@ -15,7 +15,7 @@ const khand = Khand({
 export const metadata: Metadata = {
   title: 'Study Hub — Personal Study Material Manager',
   description:
-    'Upload, verify, organize, and study from your PDFs and documents. Generate quizzes, track progress, and master your subjects with AI-powered tools.',
+    'Upload, verify, organize, and study from your PDFs and documents. Practice hardcoded quizzes, track progress, and master your subjects with AI-powered study tools.',
 };
 
 export default function RootLayout({
