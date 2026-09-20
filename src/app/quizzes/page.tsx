@@ -30,11 +30,14 @@ interface Quiz {
   file?: { filename: string };
 }
 
+const SESSION_QUESTION_COUNT = 10;
+
 export default function QuizzesPage() {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterFormat, setFilterFormat] = useState<string>('all');
   const [filterDifficulty, setFilterDifficulty] = useState<string>('all');
+  const [sessionTopicId, setSessionTopicId] = useState('all');
   const [sessionActive, setSessionActive] = useState(false);
   const [sessionQuizzes, setSessionQuizzes] = useState<Quiz[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -82,13 +85,29 @@ export default function QuizzesPage() {
     return true;
   });
 
+  const sessionTopics = Array.from(
+    new Map(
+      quizzes
+        .filter((quiz): quiz is Quiz & { topic_id: string; topic: { name: string; icon: string } } =>
+          Boolean(quiz.topic_id && quiz.topic),
+        )
+        .map((quiz) => [quiz.topic_id, quiz.topic]),
+    ).entries(),
+  )
+    .map(([id, topic]) => ({ id, ...topic }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const sessionSubjectQuizzes = sessionTopicId === 'all'
+    ? filteredQuizzes
+    : filteredQuizzes.filter((quiz) => quiz.topic_id === sessionTopicId);
+
   function startSession(format?: string) {
-    let pool = filteredQuizzes;
+    let pool = sessionSubjectQuizzes;
     if (format) pool = pool.filter((q) => q.format === format);
 
     // Shuffle
     const shuffled = [...pool].sort(() => Math.random() - 0.5);
-    setSessionQuizzes(shuffled.slice(0, 20)); // Max 20 per session
+    setSessionQuizzes(shuffled.slice(0, SESSION_QUESTION_COUNT));
     setCurrentIndex(0);
     setSelectedAnswer(null);
     setShowResult(false);
@@ -341,16 +360,35 @@ export default function QuizzesPage() {
       </div>
 
       {/* Quick Start */}
-      <div className="quiz-quick-start animate-in animate-in-1" style={{ display: 'flex', gap: 'var(--space-4)', marginBottom: 'var(--space-8)', flexWrap: 'wrap' }}>
-        <button className="btn btn-primary btn-lg" onClick={() => startSession()} disabled={filteredQuizzes.length === 0}>
+      <div className="quiz-quick-start animate-in animate-in-1" style={{ display: 'flex', gap: 'var(--space-4)', marginBottom: 'var(--space-8)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+          <label htmlFor="quiz-session-subject" style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', fontWeight: 600 }}>
+            Quiz subject
+          </label>
+          <select
+            id="quiz-session-subject"
+            value={sessionTopicId}
+            onChange={(event) => setSessionTopicId(event.target.value)}
+            style={{ minWidth: 220 }}
+          >
+            <option value="all">All subjects</option>
+            {sessionTopics.map((topic) => (
+              <option key={topic.id} value={topic.id}>{topic.name}</option>
+            ))}
+          </select>
+        </div>
+        <button className="btn btn-primary btn-lg" onClick={() => startSession()} disabled={sessionSubjectQuizzes.length === 0}>
           <Play size={18} /> Start Quiz Session
         </button>
-        <button className="btn btn-secondary btn-lg" onClick={() => startSession('multiple_choice')} disabled={filteredQuizzes.filter((q) => q.format === 'multiple_choice').length === 0}>
+        <button className="btn btn-secondary btn-lg" onClick={() => startSession('multiple_choice')} disabled={sessionSubjectQuizzes.filter((q) => q.format === 'multiple_choice').length === 0}>
           <Layers size={18} /> Multiple Choice Only
         </button>
-        <button className="btn btn-secondary btn-lg" onClick={() => startSession('flashcard')} disabled={filteredQuizzes.filter((q) => q.format === 'flashcard').length === 0}>
+        <button className="btn btn-secondary btn-lg" onClick={() => startSession('flashcard')} disabled={sessionSubjectQuizzes.filter((q) => q.format === 'flashcard').length === 0}>
           <Shuffle size={18} /> Flashcards Only
         </button>
+        <span style={{ alignSelf: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)' }}>
+          Up to {SESSION_QUESTION_COUNT} questions per session
+        </span>
       </div>
 
       {/* Filters */}
