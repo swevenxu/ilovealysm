@@ -3,13 +3,11 @@
 import { useState, useEffect } from 'react';
 import {
   Play,
-  Shuffle,
   CheckCircle2,
   XCircle,
   RotateCcw,
   ChevronRight,
   ChevronLeft,
-  Layers,
 } from 'lucide-react';
 
 interface Quiz {
@@ -101,12 +99,9 @@ export default function QuizzesPage() {
     ? filteredQuizzes
     : filteredQuizzes.filter((quiz) => quiz.topic_id === sessionTopicId);
 
-  function startSession(format?: string) {
-    let pool = sessionSubjectQuizzes;
-    if (format) pool = pool.filter((q) => q.format === format);
-
+  function startSession() {
     // Shuffle
-    const shuffled = [...pool].sort(() => Math.random() - 0.5);
+    const shuffled = [...sessionSubjectQuizzes].sort(() => Math.random() - 0.5);
     setSessionQuizzes(shuffled.slice(0, SESSION_QUESTION_COUNT));
     setCurrentIndex(0);
     setSelectedAnswer(null);
@@ -380,14 +375,6 @@ export default function QuizzesPage() {
         <button className="btn btn-primary btn-lg" onClick={() => startSession()} disabled={sessionSubjectQuizzes.length === 0}>
           <Play size={18} /> Start Quiz Session
         </button>
-        <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'nowrap' }}>
-          <button className="btn btn-secondary btn-lg" onClick={() => startSession('multiple_choice')} disabled={sessionSubjectQuizzes.filter((q) => q.format === 'multiple_choice').length === 0}>
-            <Layers size={18} /> Multiple Choice Only
-          </button>
-          <button className="btn btn-secondary btn-lg" onClick={() => startSession('flashcard')} disabled={sessionSubjectQuizzes.filter((q) => q.format === 'flashcard').length === 0}>
-            <Shuffle size={18} /> Flashcards Only
-          </button>
-        </div>
       </div>
 
       {/* Filters */}
@@ -407,9 +394,6 @@ export default function QuizzesPage() {
             <option value="hard">Hard</option>
           </select>
         </div>
-        <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>
-          {filteredQuizzes.length} question{filteredQuizzes.length !== 1 ? 's' : ''}
-        </span>
       </div>
 
       {/* Quiz List */}
