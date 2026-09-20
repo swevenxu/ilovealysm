@@ -33,9 +33,8 @@ const SESSION_QUESTION_COUNT = 10;
 export default function QuizzesPage() {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filterFormat, setFilterFormat] = useState<string>('all');
+  const [filterSubject, setFilterSubject] = useState<string>('all');
   const [filterDifficulty, setFilterDifficulty] = useState<string>('all');
-  const [sessionTopicId, setSessionTopicId] = useState('all');
   const [sessionActive, setSessionActive] = useState(false);
   const [sessionQuizzes, setSessionQuizzes] = useState<Quiz[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -78,12 +77,12 @@ export default function QuizzesPage() {
   }, [currentIndex, sessionActive, sessionQuizzes]);
 
   const filteredQuizzes = quizzes.filter((q) => {
-    if (filterFormat !== 'all' && q.format !== filterFormat) return false;
+    if (filterSubject !== 'all' && q.topic_id !== filterSubject) return false;
     if (filterDifficulty !== 'all' && q.difficulty !== filterDifficulty) return false;
     return true;
   });
 
-  const sessionTopics = Array.from(
+  const subjects = Array.from(
     new Map(
       quizzes
         .filter((quiz): quiz is Quiz & { topic_id: string; topic: { name: string; icon: string } } =>
@@ -95,13 +94,9 @@ export default function QuizzesPage() {
     .map(([id, topic]) => ({ id, ...topic }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  const sessionSubjectQuizzes = sessionTopicId === 'all'
-    ? filteredQuizzes
-    : filteredQuizzes.filter((quiz) => quiz.topic_id === sessionTopicId);
-
   function startSession() {
     // Shuffle
-    const shuffled = [...sessionSubjectQuizzes].sort(() => Math.random() - 0.5);
+    const shuffled = [...filteredQuizzes].sort(() => Math.random() - 0.5);
     setSessionQuizzes(shuffled.slice(0, SESSION_QUESTION_COUNT));
     setCurrentIndex(0);
     setSelectedAnswer(null);
@@ -132,7 +127,7 @@ export default function QuizzesPage() {
 
     // Log attempt
     try {
-      await fetch(`/api/quizzes/${quiz.id}/attempt`, {
+      const response = await fetch(`/api/quizzes/${quiz.id}/attempt`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -141,8 +136,10 @@ export default function QuizzesPage() {
           time_spent_seconds: 0,
         }),
       });
+      if (!response.ok) throw new Error('Failed to save quiz attempt');
+      setQuizzes((previous) => previous.filter((item) => item.id !== quiz.id));
     } catch {
-      // Non-critical, don't block UI
+      // Keep the question visible if its attempt could not be recorded.
     }
   }
 
@@ -355,24 +352,8 @@ export default function QuizzesPage() {
       </div>
 
       {/* Quick Start */}
-      <div className="quiz-quick-start animate-in animate-in-1" style={{ display: 'flex', gap: 'var(--space-4)', marginBottom: 'var(--space-8)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-          <label htmlFor="quiz-session-subject" style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', fontWeight: 600 }}>
-            Quiz subject
-          </label>
-          <select
-            id="quiz-session-subject"
-            value={sessionTopicId}
-            onChange={(event) => setSessionTopicId(event.target.value)}
-            style={{ minWidth: 220 }}
-          >
-            <option value="all">All subjects</option>
-            {sessionTopics.map((topic) => (
-              <option key={topic.id} value={topic.id}>{topic.name}</option>
-            ))}
-          </select>
-        </div>
-        <button className="btn btn-primary btn-lg" onClick={() => startSession()} disabled={sessionSubjectQuizzes.length === 0}>
+      <div className="quiz-quick-start animate-in animate-in-1" style={{ display: 'flex', gap: 'var(--space-4)', marginBottom: 'var(--space-8)', flexWrap: 'wrap' }}>
+        <button className="btn btn-primary btn-lg" onClick={() => startSession()} disabled={filteredQuizzes.length === 0}>
           <Play size={18} /> Start Quiz Session
         </button>
       </div>
@@ -380,14 +361,15 @@ export default function QuizzesPage() {
       {/* Filters */}
       <div className="animate-in animate-in-2 filter-row" style={{ display: 'flex', gap: 'var(--space-4)', marginBottom: 'var(--space-6)', alignItems: 'center', flexWrap: 'wrap' }}>
         <div className="select-wrapper">
-          <select value={filterFormat} onChange={(e) => setFilterFormat(e.target.value)}>
-            <option value="all">All Formats</option>
-            <option value="multiple_choice">Multiple Choice</option>
-            <option value="flashcard">Flashcard</option>
+          <select aria-label="Filter by subject" value={filterSubject} onChange={(e) => setFilterSubject(e.target.value)}>
+            <option value="all">All Subjects</option>
+            {subjects.map((subject) => (
+              <option key={subject.id} value={subject.id}>{subject.name}</option>
+            ))}
           </select>
         </div>
         <div className="select-wrapper">
-          <select value={filterDifficulty} onChange={(e) => setFilterDifficulty(e.target.value)}>
+          <select aria-label="Filter by difficulty" value={filterDifficulty} onChange={(e) => setFilterDifficulty(e.target.value)}>
             <option value="all">All Difficulties</option>
             <option value="easy">Easy</option>
             <option value="medium">Medium</option>
