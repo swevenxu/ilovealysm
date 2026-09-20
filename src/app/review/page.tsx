@@ -117,12 +117,6 @@ export default function ReviewPage() {
         <div className="page-container">
             <div className="page-header">
                 <h1 className="page-title">Review</h1>
-                {!loading && total > 0 && (
-                    <p className="page-subtitle">
-                        {total} question{total !== 1 ? 's' : ''} to review across{' '}
-                        {groups.length} topic{groups.length !== 1 ? 's' : ''}
-                    </p>
-                )}
             </div>
 
             {loading ? (
