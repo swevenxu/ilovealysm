@@ -67,6 +67,16 @@ export async function GET() {
       perTopic.set(topic_id, cur);
     }
 
+    // Latest answered_at per topic
+    const latestAnsweredByTopic = new Map<string, string>();
+    for (const a of attempts) {
+      const tid = qToTopic.get(a.question_id) ?? null;
+      if (!tid) continue;
+      if (!latestAnsweredByTopic.has(tid)) {
+        latestAnsweredByTopic.set(tid, a.answered_at);
+      }
+    }
+
     const topicSummaries = topics.map((t) => {
       const stats = perTopic.get(t.id) || { attempted: 0, correct: 0 };
       const mastery = stats.attempted === 0 ? 0 : stats.correct / stats.attempted;
@@ -78,7 +88,7 @@ export async function GET() {
         total_attempts: stats.attempted,
         correct_attempts: stats.correct,
         wrong_count: stats.attempted - stats.correct,
-        last_studied: null,
+        last_studied: latestAnsweredByTopic.get(t.id) || null,
         next_review: null,
       };
     });
