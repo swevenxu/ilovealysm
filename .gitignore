@@ -63,3 +63,10 @@ deepseek_python_*.py
 find_llm_fix_targets.py
 scan.json
 Pasted text.txt
+
+dump_mastery_only.txt
+dump_quiz_mastery.py
+dump_quiz_mastery.txt
+quiz.py
+dump_for_fix.txt
+Pasted text.txt
