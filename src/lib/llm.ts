@@ -1,10 +1,18 @@
 /**
- * LLM client with Gemini primary → OpenRouter → Groq fallback.
+ * LLM client with multi-provider failover.
+ *
+ * Order:
+ *   1. NVIDIA NIM      (primary — meta/llama-3.3-70b-instruct)
+ *   2. Cerebras        (secondary — llama-3.3-70b)
+ *   3. Mistral         (tertiary — mistral-small-latest)
+ *   4. Groq            (quaternary — openai/gpt-oss-120b)
+ *   5. Gemini          (emergency — gemini-3.6-flash)
+ *   6. OpenRouter      (last resort — free models)
  *
  * Handles:
- * - Rate limit detection (HTTP 429) and automatic failover
- * - Token-aware chunking for Groq free tier (6,000 TPM)
- * - Request throttling (≤30 req/min)
+ * - HTTP 429 detection and automatic failover
+ * - Groq token-aware throttling (free tier 6,000 TPM)
+ * - Short-circuits OpenRouter on account-wide daily quota
  */
 
 import Groq from 'groq-sdk';
@@ -13,9 +21,19 @@ import Groq from 'groq-sdk';
 // Configuration
 // ============================================================
 
+const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '';
+const NVIDIA_MODEL = process.env.NVIDIA_MODEL || 'meta/llama-3.3-70b-instruct';
+
+const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY || '';
+const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || 'llama-3.3-70b';
+
+const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || '';
+const MISTRAL_MODEL = process.env.MISTRAL_MODEL || 'mistral-small-latest';
+
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
+
 const DEFAULT_OPENROUTER_MODELS = [
   'nex-agi/nex-n2.5-mini:free',
   'liquid/lfm-2.5-2.6b:free',
@@ -26,23 +44,23 @@ const OPENROUTER_MODELS = (process.env.OPENROUTER_MODELS || process.env.OPENROUT
   .split(',')
   .map((model) => model.trim())
   .filter(Boolean);
-const OPENROUTER_MODEL_LIST = OPENROUTER_MODELS.length > 0 ? OPENROUTER_MODELS : DEFAULT_OPENROUTER_MODELS;
+const OPENROUTER_MODEL_LIST =
+  OPENROUTER_MODELS.length > 0 ? OPENROUTER_MODELS : DEFAULT_OPENROUTER_MODELS;
 
 // Groq free tier limits
-const GROQ_MAX_RPM = 30;          // 30 requests/minute
-const GROQ_MAX_TPM = 6000;        // 6,000 tokens/minute
-const GROQ_MAX_RPD = 14400;       // 14,400 requests/day
+const GROQ_MAX_RPM = 30;
+const GROQ_MAX_TPM = 6000;
+const GROQ_MAX_RPD = 14400;
 
-// Approximate: 1 token ≈ 4 characters
 const CHARS_PER_TOKEN = 4;
 
 // ============================================================
-// Rate limiter state with sliding window
+// Groq rate limiter state
 // ============================================================
 
 interface RateLimitWindow {
-  requests: number[];  // timestamps of requests
-  tokens: number[];    // token counts with timestamps
+  requests: number[];
+  tokens: number[];
 }
 
 const rateLimitState: RateLimitWindow = {
@@ -53,81 +71,46 @@ const rateLimitState: RateLimitWindow = {
 let groqAvailable = true;
 let groqCooldownUntil = 0;
 
-/**
- * Clean up old entries from the sliding window
- */
 function cleanupWindow() {
   const now = Date.now();
   const oneMinuteAgo = now - 60_000;
   const oneDayAgo = now - 86_400_000;
 
-  // Keep only requests from the last day
-  rateLimitState.requests = rateLimitState.requests.filter(
-    (timestamp) => timestamp > oneDayAgo
-  );
-
-  // Keep only tokens from the last minute
-  rateLimitState.tokens = rateLimitState.tokens.filter(
-    (timestamp) => timestamp > oneMinuteAgo
-  );
+  rateLimitState.requests = rateLimitState.requests.filter((t) => t > oneDayAgo);
+  rateLimitState.tokens = rateLimitState.tokens.filter((t) => t > oneMinuteAgo);
 }
 
-/**
- * Get current usage in the sliding window
- */
 function getCurrentUsage() {
   cleanupWindow();
   const now = Date.now();
   const oneMinuteAgo = now - 60_000;
 
-  const requestsThisMinute = rateLimitState.requests.filter(
-    (timestamp) => timestamp > oneMinuteAgo
-  ).length;
-
+  const requestsThisMinute = rateLimitState.requests.filter((t) => t > oneMinuteAgo).length;
   const tokensThisMinute = rateLimitState.tokens.length;
   const requestsToday = rateLimitState.requests.length;
 
-  return {
-    requestsThisMinute,
-    tokensThisMinute,
-    requestsToday,
-  };
+  return { requestsThisMinute, tokensThisMinute, requestsToday };
 }
 
-/**
- * Record a request and token usage
- */
 function recordUsage(tokenCount: number) {
   const now = Date.now();
   rateLimitState.requests.push(now);
   rateLimitState.tokens.push(now);
-
-  // Add multiple entries for token count (simpler than tracking counts)
   for (let i = 1; i < tokenCount; i++) {
     rateLimitState.tokens.push(now);
   }
-
   cleanupWindow();
 }
 
-/**
- * Check if we can make a Groq request
- */
 function canUseGroq(estimatedTokens: number): boolean {
   const now = Date.now();
 
-  // Check cooldown
-  if (!groqAvailable && now < groqCooldownUntil) {
-    return false;
-  } else if (now >= groqCooldownUntil) {
-    groqAvailable = true;
-  }
+  if (!groqAvailable && now < groqCooldownUntil) return false;
+  if (now >= groqCooldownUntil) groqAvailable = true;
 
   if (!GROQ_API_KEY) return false;
 
   const usage = getCurrentUsage();
-
-  // Check limits
   if (usage.requestsThisMinute >= GROQ_MAX_RPM) return false;
   if (usage.tokensThisMinute + estimatedTokens > GROQ_MAX_TPM) return false;
   if (usage.requestsToday >= GROQ_MAX_RPD) return false;
@@ -135,50 +118,144 @@ function canUseGroq(estimatedTokens: number): boolean {
   return true;
 }
 
-/**
- * More accurate token estimation using common patterns
- */
 function estimateTokens(text: string): number {
-  // Base estimation: ~4 chars per token
   let estimate = Math.ceil(text.length / CHARS_PER_TOKEN);
 
-  // Adjust for common patterns
   const words = text.split(/\s+/).length;
   const codeBlocks = (text.match(/```/g) || []).length / 2;
   const jsonContent = text.includes('{') && text.includes('}');
 
-  // Code and JSON tend to have more tokens per character
-  if (codeBlocks > 0) {
-    estimate *= 1.2;
-  }
-  if (jsonContent) {
-    estimate *= 1.1;
-  }
+  if (codeBlocks > 0) estimate *= 1.2;
+  if (jsonContent) estimate *= 1.1;
 
-  // Words-based validation (typically 1.3 tokens per word)
   const wordBasedEstimate = Math.ceil(words * 1.3);
-
-  // Use the higher estimate to be safe
   return Math.max(estimate, wordBasedEstimate);
 }
 
 // ============================================================
-// Groq client
+// Shared OpenAI-compatible chat call
+// ============================================================
+
+interface OpenAIChatResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+}
+
+async function callOpenAICompatible(
+  endpoint: string,
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  userContent: string,
+  options: LLMOptions,
+  providerLabel: string,
+): Promise<string> {
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent },
+      ],
+      temperature: options.temperature ?? 0.3,
+      max_tokens: options.maxTokens || 4096,
+      ...(options.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(
+      `${providerLabel} request failed (${response.status}): ${errorBody.slice(0, 300)}`,
+    );
+  }
+
+  const data = (await response.json()) as OpenAIChatResponse;
+  const content = data.choices?.[0]?.message?.content || '';
+  if (!content) throw new Error(`${providerLabel} returned an empty response`);
+  return content;
+}
+
+// ============================================================
+// NVIDIA NIM (primary)
+// ============================================================
+
+async function callNvidia(
+  systemPrompt: string,
+  userContent: string,
+  options: LLMOptions = {},
+): Promise<string> {
+  return callOpenAICompatible(
+    'https://integrate.api.nvidia.com/v1/chat/completions',
+    NVIDIA_API_KEY,
+    options.model || NVIDIA_MODEL,
+    systemPrompt,
+    userContent,
+    options,
+    'NVIDIA NIM',
+  );
+}
+
+// ============================================================
+// Cerebras (secondary)
+// ============================================================
+
+async function callCerebras(
+  systemPrompt: string,
+  userContent: string,
+  options: LLMOptions = {},
+): Promise<string> {
+  return callOpenAICompatible(
+    'https://api.cerebras.ai/v1/chat/completions',
+    CEREBRAS_API_KEY,
+    options.model || CEREBRAS_MODEL,
+    systemPrompt,
+    userContent,
+    options,
+    'Cerebras',
+  );
+}
+
+// ============================================================
+// Mistral (tertiary)
+// ============================================================
+
+async function callMistral(
+  systemPrompt: string,
+  userContent: string,
+  options: LLMOptions = {},
+): Promise<string> {
+  return callOpenAICompatible(
+    'https://api.mistral.ai/v1/chat/completions',
+    MISTRAL_API_KEY,
+    options.model || MISTRAL_MODEL,
+    systemPrompt,
+    userContent,
+    options,
+    'Mistral',
+  );
+}
+
+// ============================================================
+// Groq (quaternary) — uses the SDK
 // ============================================================
 
 let groqClient: Groq | null = null;
 
 function getGroqClient(): Groq {
-  if (!groqClient) {
-    groqClient = new Groq({ apiKey: GROQ_API_KEY });
-  }
+  if (!groqClient) groqClient = new Groq({ apiKey: GROQ_API_KEY });
   return groqClient;
 }
 
 async function callGroq(
   systemPrompt: string,
   userContent: string,
-  options: LLMOptions = {}
+  options: LLMOptions = {},
 ): Promise<string> {
   const groq = getGroqClient();
 
@@ -195,21 +272,18 @@ async function callGroq(
 
   const content = response.choices[0]?.message?.content || '';
   const estimatedTokenCount = estimateTokens(systemPrompt + userContent + content);
-
-  // Record usage in sliding window
   recordUsage(estimatedTokenCount);
-
   return content;
 }
 
 // ============================================================
-// Gemini client (primary)
+// Gemini (emergency)
 // ============================================================
 
 async function callGemini(
   systemPrompt: string,
   userContent: string,
-  options: LLMOptions = {}
+  options: LLMOptions = {},
 ): Promise<string> {
   const { GoogleGenerativeAI } = await import('@google/generative-ai');
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -224,7 +298,7 @@ async function callGemini(
 }
 
 // ============================================================
-// OpenRouter client (secondary)
+// OpenRouter (last resort)
 // ============================================================
 
 async function callOpenRouter(
@@ -259,12 +333,12 @@ async function callOpenRouter(
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new Error(`OpenRouter request failed (${response.status}): ${errorBody.slice(0, 300)}`);
+    throw new Error(
+      `OpenRouter request failed (${response.status}): ${errorBody.slice(0, 300)}`,
+    );
   }
 
-  const data = await response.json() as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
+  const data = (await response.json()) as OpenAIChatResponse;
   const content = data.choices?.[0]?.message?.content || '';
   if (!content) throw new Error('OpenRouter returned an empty response');
   return content;
@@ -283,71 +357,57 @@ export interface LLMOptions {
   forceGemini?: boolean;
 }
 
-/**
- * Send a prompt to the LLM with automatic provider failover.
- *
- * Order:
- *   1. Gemini (primary)
- *   2. OpenRouter free models (secondary)
- *   3. Groq (tertiary)
- *
- * If `options.forceGemini` is set, only Gemini is used.
- */
+export type LLMProvider = 'nvidia' | 'cerebras' | 'mistral' | 'groq' | 'gemini' | 'openrouter';
+
 export async function llmGenerate(
   systemPrompt: string,
   userContent: string,
-  options: LLMOptions = {}
-): Promise<{ text: string; provider: 'openrouter' | 'groq' | 'gemini' }> {
+  options: LLMOptions = {},
+): Promise<{ text: string; provider: LLMProvider }> {
   const inputTokens = estimateTokens(systemPrompt + userContent);
-  // Output is roughly same size as input for reformatting tasks
-  const estimatedTotalTokens = inputTokens * 2;
+  // Groq's TPM gate measures input tokens; do NOT double.
+  const estimatedTotalTokens = inputTokens;
 
   const failures: string[] = [];
 
-  // ---------- 1. Gemini (primary) ----------
-  if (GEMINI_API_KEY) {
+  // ---------- 1. NVIDIA NIM ----------
+  if (NVIDIA_API_KEY && !options.forceGemini) {
     try {
-      const text = await callGemini(systemPrompt, userContent, options);
-      return { text, provider: 'gemini' };
+      const text = await callNvidia(systemPrompt, userContent, options);
+      return { text, provider: 'nvidia' };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error('[LLM] Gemini error:', error);
-      failures.push(`Gemini: ${msg.slice(0, 200)}`);
-      if (options.forceGemini) {
-        throw new Error(`Gemini failed (forceGemini=true): ${msg}`);
-      }
-    }
-  } else if (options.forceGemini) {
-    throw new Error('forceGemini requested but GEMINI_API_KEY is not set.');
-  }
-
-  // ---------- 2. OpenRouter free models (secondary) ----------
-  if (OPENROUTER_API_KEY) {
-    for (const model of OPENROUTER_MODEL_LIST) {
-      try {
-        const text = await callOpenRouter(systemPrompt, userContent, model, options);
-        return { text, provider: 'openrouter' };
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.error(`[LLM] OpenRouter model ${model} failed, trying the next provider:`, error);
-        failures.push(`OpenRouter(${model}): ${msg.slice(0, 200)}`);
-
-        // Account-wide daily free-tier quota: trying more free models is pointless.
-        if (
-          msg.includes('openrouter_free_tier_daily') ||
-          msg.includes('free-models-per-day')
-        ) {
-          console.warn(
-            '[LLM] OpenRouter free daily quota exhausted; skipping remaining OpenRouter models.'
-          );
-          break;
-        }
-      }
+      console.error('[LLM] NVIDIA NIM error:', error);
+      failures.push(`NVIDIA: ${msg.slice(0, 200)}`);
     }
   }
 
-  // ---------- 3. Groq (tertiary) ----------
-  if (canUseGroq(estimatedTotalTokens)) {
+  // ---------- 2. Cerebras ----------
+  if (CEREBRAS_API_KEY && !options.forceGemini) {
+    try {
+      const text = await callCerebras(systemPrompt, userContent, options);
+      return { text, provider: 'cerebras' };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error('[LLM] Cerebras error:', error);
+      failures.push(`Cerebras: ${msg.slice(0, 200)}`);
+    }
+  }
+
+  // ---------- 3. Mistral ----------
+  if (MISTRAL_API_KEY && !options.forceGemini) {
+    try {
+      const text = await callMistral(systemPrompt, userContent, options);
+      return { text, provider: 'mistral' };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error('[LLM] Mistral error:', error);
+      failures.push(`Mistral: ${msg.slice(0, 200)}`);
+    }
+  }
+
+  // ---------- 4. Groq ----------
+  if (!options.forceGemini && canUseGroq(estimatedTotalTokens)) {
     const maxRetries = 2;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -360,7 +420,7 @@ export async function llmGenerate(
         if (err?.status === 429 || err?.statusCode === 429) {
           console.warn('[LLM] Groq rate limited.');
           groqAvailable = false;
-          groqCooldownUntil = Date.now() + 60_000; // 1 minute cooldown
+          groqCooldownUntil = Date.now() + 60_000;
           failures.push('Groq: rate limited (429)');
           break;
         }
@@ -368,7 +428,7 @@ export async function llmGenerate(
         if (attempt < maxRetries) {
           const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
           console.warn(
-            `[LLM] Groq error, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`
+            `[LLM] Groq error, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
         } else {
@@ -378,23 +438,60 @@ export async function llmGenerate(
         }
       }
     }
-  } else if (!GROQ_API_KEY) {
-    failures.push('Groq: no API key configured');
-  } else {
-    failures.push('Groq: skipped (rate limit window full or in cooldown)');
+  } else if (!options.forceGemini) {
+    if (!GROQ_API_KEY) failures.push('Groq: no API key configured');
+    else failures.push('Groq: skipped (rate limit window full or in cooldown)');
   }
 
-  // ---------- All providers failed ----------
+  // ---------- 5. Gemini ----------
+  if (GEMINI_API_KEY) {
+    try {
+      const text = await callGemini(systemPrompt, userContent, options);
+      return { text, provider: 'gemini' };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error('[LLM] Gemini error:', error);
+      failures.push(`Gemini: ${msg.slice(0, 200)}`);
+
+      if (options.forceGemini) {
+        throw new Error(`Gemini failed (forceGemini=true): ${msg}`);
+      }
+    }
+  } else if (options.forceGemini) {
+    throw new Error('forceGemini requested but GEMINI_API_KEY is not set.');
+  }
+
+  // ---------- 6. OpenRouter ----------
+  if (OPENROUTER_API_KEY && !options.forceGemini) {
+    for (const model of OPENROUTER_MODEL_LIST) {
+      try {
+        const text = await callOpenRouter(systemPrompt, userContent, model, options);
+        return { text, provider: 'openrouter' };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[LLM] OpenRouter model ${model} failed:`, error);
+        failures.push(`OpenRouter(${model}): ${msg.slice(0, 200)}`);
+
+        if (
+          msg.includes('openrouter_free_tier_daily') ||
+          msg.includes('free-models-per-day')
+        ) {
+          console.warn(
+            '[LLM] OpenRouter free daily quota exhausted; skipping remaining.',
+          );
+          break;
+        }
+      }
+    }
+  }
+
+  // ---------- All failed ----------
   const detail = failures.length ? ` Tried: ${failures.join(' | ')}` : '';
   throw new Error(
-    `All LLM providers failed (Gemini → OpenRouter → Groq).${detail}`
+    `All LLM providers failed (NVIDIA → Cerebras → Mistral → Groq → Gemini → OpenRouter).${detail}`,
   );
 }
 
-/**
- * Chunk text into segments that fit within Groq's token limits.
- * Each chunk is designed to be processed as a single LLM request.
- */
 export function chunkText(text: string, maxCharsPerChunk: number = 8000): string[] {
   const lines = text.split('\n');
   const chunks: string[] = [];
@@ -411,16 +508,10 @@ export function chunkText(text: string, maxCharsPerChunk: number = 8000): string
     currentLen += line.length + 1;
   }
 
-  if (current.length > 0) {
-    chunks.push(current.join('\n'));
-  }
-
+  if (current.length > 0) chunks.push(current.join('\n'));
   return chunks;
 }
 
-/**
- * Get current rate limit status for monitoring UI.
- */
 export function getRateLimitStatus() {
   const usage = getCurrentUsage();
 
@@ -435,6 +526,9 @@ export function getRateLimitStatus() {
     hasGroqKey: !!GROQ_API_KEY,
     hasGeminiKey: !!GEMINI_API_KEY,
     hasOpenRouterKey: !!OPENROUTER_API_KEY,
+    hasNvidiaKey: !!NVIDIA_API_KEY,
+    hasCerebrasKey: !!CEREBRAS_API_KEY,
+    hasMistralKey: !!MISTRAL_API_KEY,
     percentRPM: Math.round((usage.requestsThisMinute / GROQ_MAX_RPM) * 100),
     percentTPM: Math.round((usage.tokensThisMinute / GROQ_MAX_TPM) * 100),
     percentRPD: Math.round((usage.requestsToday / GROQ_MAX_RPD) * 100),
