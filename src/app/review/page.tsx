@@ -101,79 +101,66 @@ export default function ReviewPage() {
                     </Link>
                 </div>
             ) : (
-                <>
-                    <p
-                        style={{
-                            fontSize: 'var(--text-sm)',
-                            color: 'var(--text-tertiary)',
-                            marginBottom: 'var(--space-6)',
-                        }}
-                    >
-                        {total} wrong {total === 1 ? 'answer' : 'answers'} across {groups.length}{' '}
-                        {groups.length === 1 ? 'subject' : 'subjects'}
-                    </p>
-
-                    <div className="grid grid-2 animate-in animate-in-1">
-                        {groups.map((g) => (
-                            <button
-                                key={g.topic_id}
-                                onClick={() => setSelectedTopic(g.topic_id)}
-                                className="glass-card quiz-card"
+                <div className="grid grid-2 animate-in animate-in-1">
+                    {groups.map((g) => (
+                        <button
+                            key={g.topic_id}
+                            onClick={() => setSelectedTopic(g.topic_id)}
+                            className="glass-card quiz-card"
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: 'var(--space-4)',
+                                textAlign: 'left',
+                                width: '100%',
+                                font: 'inherit',
+                                color: 'inherit',
+                            }}
+                        >
+                            <div
                                 style={{
                                     display: 'flex',
                                     alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                    gap: 'var(--space-4)',
-                                    textAlign: 'left',
-                                    width: '100%',
-                                    font: 'inherit',
-                                    color: 'inherit',
+                                    gap: 'var(--space-3)',
+                                    minWidth: 0,
                                 }}
                             >
-                                <div
-                                    style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: 'var(--space-3)',
-                                        minWidth: 0,
-                                    }}
-                                >
-                                    <span
-                                        style={{
-                                            display: 'inline-block',
-                                            width: 10,
-                                            height: 10,
-                                            borderRadius: '50%',
-                                            background: g.topic_color,
-                                            flexShrink: 0,
-                                        }}
-                                    />
-                                    <span
-                                        style={{
-                                            fontFamily: 'var(--font-heading)',
-                                            fontWeight: 700,
-                                            fontSize: 'var(--text-base)',
-                                        }}
-                                    >
-                                        {g.topic_name}
-                                    </span>
-                                </div>
                                 <span
                                     style={{
-                                        fontSize: 'var(--text-xs)',
-                                        color: 'var(--text-tertiary)',
-                                        whiteSpace: 'nowrap',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: 'var(--space-1)',
+                                        display: 'inline-block',
+                                        width: 10,
+                                        height: 10,
+                                        borderRadius: '50%',
+                                        background: g.topic_color,
+                                        flexShrink: 0,
+                                    }}
+                                />
+                                <span
+                                    style={{
+                                        fontFamily: 'var(--font-heading)',
+                                        fontWeight: 700,
+                                        fontSize: 'var(--text-base)',
                                     }}
                                 >
-                                    {g.count} to review <ChevronRight size={14} />
+                                    {g.topic_name}
                                 </span>
-                            </button>
-                        ))}
-                    </div>
-                </>
+                            </div>
+                            <span
+                                style={{
+                                    fontSize: 'var(--text-xs)',
+                                    color: 'var(--text-tertiary)',
+                                    whiteSpace: 'nowrap',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 'var(--space-1)',
+                                }}
+                            >
+                                {g.count} to review <ChevronRight size={14} />
+                            </span>
+                        </button>
+                    ))}
+                </div>
             )}
         </div>
     );
