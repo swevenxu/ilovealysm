@@ -30,6 +30,42 @@ interface Group {
     questions: ReviewQuestion[];
 }
 
+const pageStyle: React.CSSProperties = {
+    padding: '32px',
+    maxWidth: '840px',
+    margin: '0 auto',
+};
+
+const h1Style: React.CSSProperties = {
+    fontSize: '24px',
+    fontWeight: 600,
+    marginBottom: '8px',
+    color: 'var(--text-primary, #111)',
+};
+
+const subStyle: React.CSSProperties = {
+    fontSize: '13px',
+    color: 'var(--text-muted, #666)',
+    marginBottom: '24px',
+};
+
+const groupBtnStyle: React.CSSProperties = {
+    width: '100%',
+    textAlign: 'left',
+    padding: '16px',
+    border: '1px solid var(--border, #e5e5e5)',
+    borderRadius: '8px',
+    background: 'var(--surface, #fff)',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '10px',
+    fontFamily: 'inherit',
+    fontSize: '14px',
+    color: 'var(--text-primary, #111)',
+};
+
 export default function ReviewPage() {
     const [groups, setGroups] = useState<Group[]>([]);
     const [loading, setLoading] = useState(true);
@@ -51,15 +87,17 @@ export default function ReviewPage() {
         load();
     }, []);
 
-    if (loading) return <div className="p-8 text-gray-500">Loading…</div>;
+    if (loading) {
+        return <div style={pageStyle}>Loading…</div>;
+    }
 
     const total = groups.reduce((s, g) => s + g.count, 0);
 
     if (total === 0) {
         return (
-            <div className="p-8 max-w-2xl">
-                <h1 className="text-2xl font-semibold mb-3">Review</h1>
-                <p className="text-gray-600">
+            <div style={pageStyle}>
+                <h1 style={h1Style}>Review</h1>
+                <p style={{ color: 'var(--text-muted, #666)' }}>
                     Nothing to review right now. Anything you get wrong on a quiz will show up here.
                 </p>
             </div>
@@ -72,34 +110,44 @@ export default function ReviewPage() {
             <ReviewSession
                 title={group?.topic_name || 'Review'}
                 questions={group?.questions || []}
-                onExit={() => { setSelectedTopic(null); load(); }}
+                onExit={() => {
+                    setSelectedTopic(null);
+                    load();
+                }}
             />
         );
     }
 
     return (
-        <div className="p-8 max-w-3xl">
-            <h1 className="text-2xl font-semibold mb-1">Review</h1>
-            <p className="text-sm text-gray-500 mb-6">
+        <div style={pageStyle}>
+            <h1 style={h1Style}>Review</h1>
+            <p style={subStyle}>
                 {total} wrong {total === 1 ? 'answer' : 'answers'} across {groups.length}{' '}
                 {groups.length === 1 ? 'subject' : 'subjects'}
             </p>
 
-            <div className="space-y-3">
+            <div>
                 {groups.map((g) => (
                     <button
                         key={g.topic_id}
                         onClick={() => setSelectedTopic(g.topic_id)}
-                        className="w-full text-left p-4 border rounded hover:bg-gray-50 flex items-center justify-between"
+                        style={groupBtnStyle}
                     >
-                        <div className="flex items-center gap-3">
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <span
-                                className="inline-block w-2 h-2 rounded-full"
-                                style={{ backgroundColor: g.topic_color }}
+                                style={{
+                                    display: 'inline-block',
+                                    width: '10px',
+                                    height: '10px',
+                                    borderRadius: '50%',
+                                    background: g.topic_color,
+                                }}
                             />
-                            <span className="font-medium">{g.topic_name}</span>
-                        </div>
-                        <span className="text-sm text-gray-500">{g.count} to review →</span>
+                            <span style={{ fontWeight: 500 }}>{g.topic_name}</span>
+                        </span>
+                        <span style={{ fontSize: '13px', color: 'var(--text-muted, #666)' }}>
+                            {g.count} to review →
+                        </span>
                     </button>
                 ))}
             </div>
@@ -157,14 +205,23 @@ function ReviewSession({
 
     if (index >= questions.length) {
         return (
-            <div className="p-8 max-w-2xl">
-                <h1 className="text-2xl font-semibold mb-3">Review complete</h1>
-                <p className="text-gray-700">
+            <div style={pageStyle}>
+                <h1 style={h1Style}>Review complete</h1>
+                <p style={{ color: 'var(--text-primary, #111)' }}>
                     {title}: {score.right} right, {score.wrong} wrong out of {questions.length}.
                 </p>
                 <button
-                    className="mt-6 px-4 py-2 bg-black text-white rounded"
                     onClick={onExit}
+                    style={{
+                        marginTop: '24px',
+                        padding: '10px 18px',
+                        background: 'var(--accent, #111)',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                    }}
                 >
                     Back to Review
                 </button>
@@ -173,48 +230,121 @@ function ReviewSession({
     }
 
     return (
-        <div className="p-8 max-w-3xl">
-            <div className="mb-6 flex justify-between items-center">
+        <div style={pageStyle}>
+            <div
+                style={{
+                    marginBottom: '24px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                }}
+            >
                 <div>
-                    <h1 className="text-xl font-semibold">{title}</h1>
-                    <p className="text-sm text-gray-500">
+                    <h1
+                        style={{
+                            fontSize: '20px',
+                            fontWeight: 600,
+                            margin: 0,
+                            color: 'var(--text-primary, #111)',
+                        }}
+                    >
+                        {title}
+                    </h1>
+                    <p
+                        style={{
+                            fontSize: '13px',
+                            color: 'var(--text-muted, #666)',
+                            margin: '4px 0 0',
+                        }}
+                    >
                         {index + 1} of {questions.length}
                     </p>
                 </div>
                 <button
-                    className="text-sm text-gray-500 hover:text-black"
                     onClick={onExit}
+                    style={{
+                        fontSize: '13px',
+                        color: 'var(--text-muted, #666)',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                    }}
                 >
                     Exit
                 </button>
             </div>
 
             {q.is_testlet && q.stem && (
-                <div className="mb-4 p-4 bg-gray-50 rounded text-sm whitespace-pre-wrap">
+                <div
+                    style={{
+                        marginBottom: '16px',
+                        padding: '16px',
+                        background: 'var(--surface-muted, #f7f7f7)',
+                        borderRadius: '8px',
+                        fontSize: '14px',
+                        whiteSpace: 'pre-wrap',
+                        color: 'var(--text-primary, #111)',
+                    }}
+                >
                     {q.stem}
                 </div>
             )}
 
-            <p className="text-lg mb-6 whitespace-pre-wrap">{q.question_text}</p>
+            <p
+                style={{
+                    fontSize: '17px',
+                    marginBottom: '20px',
+                    whiteSpace: 'pre-wrap',
+                    color: 'var(--text-primary, #111)',
+                }}
+            >
+                {q.question_text}
+            </p>
 
             {q.options && (
-                <div className="space-y-2">
+                <div>
                     {q.options.map((o) => {
                         const isPicked = selected === o.text;
-                        let cls = 'w-full text-left p-3 border rounded ';
-                        if (!revealed) cls += 'hover:bg-gray-50';
-                        else if (o.is_correct) cls += 'bg-green-50 border-green-500';
-                        else if (isPicked) cls += 'bg-red-50 border-red-500';
-                        else cls += 'opacity-60';
+                        let bg = 'var(--surface, #fff)';
+                        let border = '1px solid var(--border, #e5e5e5)';
+                        let opacity = 1;
+
+                        if (revealed) {
+                            if (o.is_correct) {
+                                bg = '#f0fdf4';
+                                border = '1px solid #16a34a';
+                            } else if (isPicked) {
+                                bg = '#fef2f2';
+                                border = '1px solid #dc2626';
+                            } else {
+                                opacity = 0.5;
+                            }
+                        }
 
                         return (
                             <button
                                 key={o.label}
-                                className={cls}
                                 onClick={() => submit(o)}
                                 disabled={revealed}
+                                style={{
+                                    display: 'block',
+                                    width: '100%',
+                                    textAlign: 'left',
+                                    padding: '14px 16px',
+                                    marginBottom: '8px',
+                                    background: bg,
+                                    border,
+                                    borderRadius: '8px',
+                                    cursor: revealed ? 'default' : 'pointer',
+                                    opacity,
+                                    fontSize: '14px',
+                                    fontFamily: 'inherit',
+                                    color: 'var(--text-primary, #111)',
+                                }}
                             >
-                                <span className="font-semibold mr-2">{o.label}.</span>
+                                <span style={{ fontWeight: 600, marginRight: '8px' }}>
+                                    {o.label}.
+                                </span>
                                 {o.text}
                             </button>
                         );
@@ -223,21 +353,56 @@ function ReviewSession({
             )}
 
             {revealed && (
-                <div className="mt-6 p-4 bg-gray-50 rounded">
-                    <p className="font-semibold mb-2">Explanation</p>
-                    <p className="text-sm whitespace-pre-wrap">
+                <div
+                    style={{
+                        marginTop: '20px',
+                        padding: '16px',
+                        background: 'var(--surface-muted, #f7f7f7)',
+                        borderRadius: '8px',
+                    }}
+                >
+                    <p style={{ fontWeight: 600, marginBottom: '8px', fontSize: '14px' }}>
+                        Explanation
+                    </p>
+                    <p
+                        style={{
+                            fontSize: '13px',
+                            whiteSpace: 'pre-wrap',
+                            color: 'var(--text-primary, #111)',
+                            margin: 0,
+                        }}
+                    >
                         {q.explanation || 'No explanation provided.'}
                     </p>
                     {q.source_quote && (
-                        <p className="mt-3 text-xs italic text-gray-500">"{q.source_quote}"</p>
+                        <p
+                            style={{
+                                marginTop: '12px',
+                                fontSize: '12px',
+                                fontStyle: 'italic',
+                                color: 'var(--text-muted, #666)',
+                                margin: 0,
+                            }}
+                        >
+                            &ldquo;{q.source_quote}&rdquo;
+                        </p>
                     )}
                 </div>
             )}
 
             {revealed && (
                 <button
-                    className="mt-6 px-4 py-2 bg-black text-white rounded"
                     onClick={next}
+                    style={{
+                        marginTop: '20px',
+                        padding: '10px 18px',
+                        background: 'var(--accent, #111)',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                    }}
                 >
                     {index < questions.length - 1 ? 'Next' : 'Finish'}
                 </button>
