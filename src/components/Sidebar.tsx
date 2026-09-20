@@ -8,6 +8,7 @@ import {
   BrainCircuit,
   TrendingUp,
   ClipboardList,
+  RotateCcw,
   Menu,
   X,
 } from 'lucide-react';
@@ -15,6 +16,7 @@ import {
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/quizzes', label: 'Quizzes', icon: BrainCircuit },
+  { href: '/review', label: 'Review', icon: RotateCcw },
   { href: '/progress', label: 'Progress', icon: TrendingUp },
   { href: '/todo', label: 'To Do', icon: ClipboardList },
 ];
