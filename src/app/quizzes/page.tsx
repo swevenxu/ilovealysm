@@ -380,15 +380,14 @@ export default function QuizzesPage() {
         <button className="btn btn-primary btn-lg" onClick={() => startSession()} disabled={sessionSubjectQuizzes.length === 0}>
           <Play size={18} /> Start Quiz Session
         </button>
-        <button className="btn btn-secondary btn-lg" onClick={() => startSession('multiple_choice')} disabled={sessionSubjectQuizzes.filter((q) => q.format === 'multiple_choice').length === 0}>
-          <Layers size={18} /> Multiple Choice Only
-        </button>
-        <button className="btn btn-secondary btn-lg" onClick={() => startSession('flashcard')} disabled={sessionSubjectQuizzes.filter((q) => q.format === 'flashcard').length === 0}>
-          <Shuffle size={18} /> Flashcards Only
-        </button>
-        <span style={{ alignSelf: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)' }}>
-          Up to {SESSION_QUESTION_COUNT} questions per session
-        </span>
+        <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'nowrap' }}>
+          <button className="btn btn-secondary btn-lg" onClick={() => startSession('multiple_choice')} disabled={sessionSubjectQuizzes.filter((q) => q.format === 'multiple_choice').length === 0}>
+            <Layers size={18} /> Multiple Choice Only
+          </button>
+          <button className="btn btn-secondary btn-lg" onClick={() => startSession('flashcard')} disabled={sessionSubjectQuizzes.filter((q) => q.format === 'flashcard').length === 0}>
+            <Shuffle size={18} /> Flashcards Only
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
