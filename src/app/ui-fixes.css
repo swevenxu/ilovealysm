@@ -223,16 +223,6 @@ body {
   }
 }
 
-.flashcard-inner {
-  max-width: 100%;
-}
-
-.flashcard-text {
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-  max-width: 100%;
-}
-
 /* Quiz session card responsive */
 @media (max-width: 640px) {
   .quiz-generation-card {
@@ -276,15 +266,6 @@ body {
   .quiz-gen-row > div:first-child select {
     min-width: 0 !important;
     width: 100%;
-  }
-
-  .flashcard-face {
-    min-height: 240px;
-    padding: var(--space-5);
-  }
-
-  .flashcard-text {
-    font-size: var(--text-base);
   }
 
   .todo-composer form > div:first-child {

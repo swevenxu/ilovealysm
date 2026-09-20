@@ -26,9 +26,16 @@ export const verifyFileSchema = z.object({
 });
 
 export const quizAttemptSchema = z.object({
-  quizId: z.string().uuid('Invalid quiz ID'),
-  selectedAnswer: z.string().min(1, 'Answer is required'),
-  timeSpentSeconds: z.number().int().min(0).optional(),
+  selected_answer: z.string().min(1, 'Answer is required'),
+  idempotency_key: z.string().uuid('Invalid attempt ID'),
+  time_spent_seconds: z.number().int().min(0).nullable().optional(),
+});
+
+export const reviewAttemptSchema = z.object({
+  question_id: z.string().regex(/^[a-f0-9]{16}$/, 'Invalid question ID'),
+  selected_answer: z.string().min(1, 'Answer is required'),
+  idempotency_key: z.string().uuid('Invalid attempt ID'),
+  time_spent_seconds: z.number().int().min(0).nullable().optional(),
 });
 
 // ============================================================
@@ -99,7 +106,7 @@ export async function validateBody<T>(
     }
     
     return { valid: false, errors: result.errors };
-  } catch (error) {
+  } catch {
     return { valid: false, errors: ['Invalid JSON body'] };
   }
 }

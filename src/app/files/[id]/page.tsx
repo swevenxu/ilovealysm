@@ -339,7 +339,7 @@ export default function FileDetailPage() {
                           {quiz.question.length > 120 ? quiz.question.slice(0, 120) + '...' : quiz.question}
                         </div>
                         <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                          <span className="badge badge-processing">{quiz.format === 'multiple_choice' ? 'MC' : 'Flash'}</span>
+                          <span className="badge badge-processing">MC</span>
                           <span className="badge badge-pending">{quiz.difficulty}</span>
                         </div>
                       </div>

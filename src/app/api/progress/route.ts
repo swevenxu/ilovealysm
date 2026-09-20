@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerSupabase } from '@/lib/supabase';
+import { latestAttempts } from '@/lib/attempts';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +27,7 @@ export async function GET() {
   try {
     const [topicsRes, questionsRes, attemptsRes, recentRes] = await Promise.all([
       supabase.from('topics').select('id, name, color').order('name'),
-      supabase.from('questions').select('id, topic_id'),
+      supabase.from('questions').select('id, topic_id').eq('format', 'multiple_choice'),
       supabase
         .from('attempt_log')
         .select('question_id, is_correct, answered_at')
@@ -38,6 +39,9 @@ export async function GET() {
         .limit(500),
     ]);
 
+    const databaseError = topicsRes.error || questionsRes.error || attemptsRes.error || recentRes.error;
+    if (databaseError) throw databaseError;
+
     const topics: TopicRow[] = (topicsRes.data as TopicRow[]) || [];
     const questions = questionsRes.data || [];
     const attempts = attemptsRes.data || [];
@@ -47,10 +51,9 @@ export async function GET() {
     const qToTopic = new Map<string, string | null>();
     for (const q of questions) qToTopic.set(q.id, q.topic_id);
 
-    // Latest attempt per question (first row wins — ordered DESC)
+    // Use the same latest-answer rule as Review and Dashboard.
     const latest = new Map<string, LatestAttempt>();
-    for (const a of attempts) {
-      if (latest.has(a.question_id)) continue;
+    for (const a of latestAttempts(attempts).values()) {
       latest.set(a.question_id, {
         topic_id: qToTopic.get(a.question_id) ?? null,
         is_correct: a.is_correct,
@@ -122,7 +125,7 @@ export async function GET() {
       studiedToday: streakDays > 0,
       dueForReview: topicSummaries.reduce((s, t) => s + t.wrong_count, 0),
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('progress error:', error);
     return NextResponse.json({
       topics: [], totalAttempts: 0, totalCorrect: 0, overallMastery: 0,

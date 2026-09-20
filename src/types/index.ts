@@ -42,7 +42,7 @@ export interface FileRecord {
 
 export interface PageRecord {
   id: string;
-  file_id: string;
+  file_id: string | null;
   page_number: number;
   raw_text: string | null;
   ocr_text: string | null;
@@ -59,7 +59,7 @@ export interface TopicRecord {
 }
 
 export interface QuizOption {
-  label: string;
+  label: 'A' | 'B' | 'C' | 'D';
   text: string;
   is_correct: boolean;
 }
@@ -76,8 +76,8 @@ export interface QuizRecord {
   file_id: string;
   topic_id: string | null;
   question: string;
-  format: 'multiple_choice' | 'flashcard';
-  options: QuizOption[] | null;
+  format: 'multiple_choice';
+  options: QuizOption[];
   answer: string;
   explanation: string | null;
   source_page: number | null;
@@ -135,9 +135,9 @@ export interface VerificationReport {
 }
 
 export interface QuizAttemptRequest {
-  quizId: string;
-  selectedAnswer: string;
-  timeSpentSeconds?: number;
+  selected_answer: string;
+  idempotency_key: string;
+  time_spent_seconds?: number | null;
 }
 
 export interface QuizAttemptResponse {

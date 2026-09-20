@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSupabase } from '@/lib/supabase';
+import { isMultipleChoiceOptions } from '@/lib/mcq';
+import { latestAttempts } from '@/lib/attempts';
+import { reviewAttemptSchema, validateBody } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,7 +45,8 @@ export async function GET() {
                 .order('answered_at', { ascending: false }),
             supabase
                 .from('questions')
-                .select('id, topic_id, question_text, format, options, correct_answer, explanation, difficulty, stem, sub_questions, is_testlet, source_quote'),
+                .select('id, topic_id, question_text, format, options, correct_answer, explanation, difficulty, stem, sub_questions, is_testlet, source_quote')
+                .eq('format', 'multiple_choice'),
             supabase.from('topics').select('id, name, color'),
         ]);
 
@@ -50,18 +54,20 @@ export async function GET() {
         const questions = (questionsRes.data as QuestionRow[]) || [];
         const topics = (topicsRes.data as TopicRow[]) || [];
 
-        // Latest attempt per question
-        const latest = new Map<string, { is_correct: boolean; answered_at: string }>();
-        for (const a of attempts) {
-            if (latest.has(a.question_id)) continue;
-            latest.set(a.question_id, { is_correct: a.is_correct, answered_at: a.answered_at });
-        }
+        if (attemptsRes.error) throw attemptsRes.error;
+        if (questionsRes.error) throw questionsRes.error;
+        if (topicsRes.error) throw topicsRes.error;
+
+        // Use the same latest-answer rule as Dashboard and Progress.
+        const latest = latestAttempts(attempts);
 
         const wrongIds = new Set(
             [...latest.entries()].filter(([, v]) => !v.is_correct).map(([id]) => id),
         );
 
-        const wrongQuestions = questions.filter((q) => wrongIds.has(q.id));
+        const wrongQuestions = questions.filter(
+            (q) => wrongIds.has(q.id) && isMultipleChoiceOptions(q.options),
+        );
 
         // Group by topic
         const topicById = new Map<string, TopicRow>();
@@ -114,33 +120,33 @@ export async function POST(request: NextRequest) {
     const supabase = getServerSupabase();
     if (!supabase) return NextResponse.json({ error: 'Not configured' }, { status: 503 });
 
+    const parsed = await validateBody(request, reviewAttemptSchema);
+    if (!parsed.valid) {
+        return NextResponse.json({ error: parsed.errors.join(', ') }, { status: 400 });
+    }
+
     try {
-        const body = await request.json();
-        const { question_id, selected_answer, is_correct, time_spent_seconds } = body;
-
-        if (!question_id || typeof is_correct !== 'boolean') {
-            return NextResponse.json(
-                { error: 'question_id and is_correct required' },
-                { status: 400 },
-            );
-        }
-
         const { data, error } = await supabase
-            .from('attempt_log')
-            .insert({
-                question_id,
-                selected_answer,
-                is_correct,
-                time_spent_seconds: time_spent_seconds || null,
+            .rpc('record_multiple_choice_attempt', {
+                p_question_id: parsed.data.question_id,
+                p_selected_answer: parsed.data.selected_answer,
+                p_idempotency_key: parsed.data.idempotency_key,
+                p_time_spent_seconds: parsed.data.time_spent_seconds ?? null,
             })
-            .select()
-            .single();
 
-        if (error) throw error;
-        return NextResponse.json(data);
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        const attempt = (data || [])[0] as AttemptResult | undefined;
+        if (!attempt) return NextResponse.json({ error: 'Attempt could not be recorded' }, { status: 500 });
+        return NextResponse.json(attempt);
     } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : 'Unknown error';
         console.error('review POST error:', msg);
         return NextResponse.json({ error: msg }, { status: 500 });
     }
+}
+
+interface AttemptResult {
+    attempt_id: string;
+    question_id: string;
+    is_correct: boolean;
 }

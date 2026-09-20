@@ -52,7 +52,7 @@ export interface FileRecord {
 
 export interface PageRecord {
   id: string;
-  file_id: string;
+  file_id: string | null;
   page_number: number;
   raw_text: string | null;
   ocr_text: string | null;
@@ -73,8 +73,8 @@ export interface QuizRecord {
   file_id: string;
   topic_id: string | null;
   question: string;
-  format: 'multiple_choice' | 'flashcard';
-  options: { label: string; text: string; is_correct: boolean }[] | null;
+  format: 'multiple_choice';
+  options: { label: 'A' | 'B' | 'C' | 'D'; text: string; is_correct: boolean }[];
   answer: string;
   explanation: string | null;
   source_page: number | null;

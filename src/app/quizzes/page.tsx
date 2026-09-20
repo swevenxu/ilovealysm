@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Play,
   CheckCircle2,
@@ -12,11 +12,11 @@ import {
 
 interface Quiz {
   id: string;
-  file_id: string;
+  file_id: string | null;
   topic_id: string | null;
   question: string;
-  format: 'multiple_choice' | 'flashcard';
-  options: { label: string; text: string; is_correct: boolean }[] | null;
+  format: 'multiple_choice';
+  options: { label: 'A' | 'B' | 'C' | 'D'; text: string; is_correct: boolean }[];
   answer: string;
   explanation: string | null;
   source_page: number | null;
@@ -40,10 +40,10 @@ export default function QuizzesPage() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [showResult, setShowResult] = useState(false);
-  const [isFlipped, setIsFlipped] = useState(false);
-  const [flashcardReadyId, setFlashcardReadyId] = useState<string | null>(null);
+  const [savingAnswer, setSavingAnswer] = useState(false);
+  const [answerError, setAnswerError] = useState<string | null>(null);
   const [sessionResults, setSessionResults] = useState<{ quizId: string; correct: boolean }[]>([]);
-  const [previewFlipIds, setPreviewFlipIds] = useState<Record<string, boolean>>({});
+  const pendingAttempt = useRef<{ quizId: string; answer: string; key: string } | null>(null);
 
   useEffect(() => {
     async function loadQuizzes() {
@@ -66,16 +66,6 @@ export default function QuizzesPage() {
     void loadQuizzes();
   }, []);
 
-  useEffect(() => {
-    const flashcard = sessionQuizzes[currentIndex];
-    if (!sessionActive || flashcard?.format !== 'flashcard') {
-      return;
-    }
-
-    const frame = requestAnimationFrame(() => setFlashcardReadyId(flashcard.id));
-    return () => cancelAnimationFrame(frame);
-  }, [currentIndex, sessionActive, sessionQuizzes]);
-
   const filteredQuizzes = quizzes.filter((q) => {
     if (filterSubject !== 'all' && q.topic_id !== filterSubject) return false;
     if (filterDifficulty !== 'all' && q.difficulty !== filterDifficulty) return false;
@@ -95,51 +85,62 @@ export default function QuizzesPage() {
     .sort((a, b) => a.name.localeCompare(b.name));
 
   function startSession() {
+    if (filteredQuizzes.length === 0) return;
+
     // Shuffle
     const shuffled = [...filteredQuizzes].sort(() => Math.random() - 0.5);
     setSessionQuizzes(shuffled.slice(0, SESSION_QUESTION_COUNT));
     setCurrentIndex(0);
     setSelectedAnswer(null);
     setShowResult(false);
-    setIsFlipped(false);
-    setFlashcardReadyId(null);
+    setSavingAnswer(false);
+    setAnswerError(null);
     setSessionResults([]);
+    pendingAttempt.current = null;
     setSessionActive(true);
   }
 
   function endSession() {
+    pendingAttempt.current = null;
     setSessionActive(false);
   }
 
   async function submitAnswer(answer: string) {
     const quiz = sessionQuizzes[currentIndex];
-    if (!quiz) return;
+    if (!quiz || showResult || savingAnswer || (selectedAnswer && selectedAnswer !== answer)) return;
 
     setSelectedAnswer(answer);
-    setShowResult(true);
+    setSavingAnswer(true);
+    setAnswerError(null);
 
-    const isCorrect =
-      quiz.format === 'flashcard'
-        ? answer === 'correct'
-        : quiz.options?.find((o) => o.text === answer)?.is_correct ?? false;
+    const existingAttempt = pendingAttempt.current;
+    const idempotencyKey = existingAttempt?.quizId === quiz.id && existingAttempt.answer === answer
+      ? existingAttempt.key
+      : crypto.randomUUID();
+    pendingAttempt.current = { quizId: quiz.id, answer, key: idempotencyKey };
 
-    setSessionResults((prev) => [...prev, { quizId: quiz.id, correct: isCorrect }]);
-
-    // Log attempt
     try {
       const response = await fetch(`/api/quizzes/${quiz.id}/attempt`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           selected_answer: answer,
-          is_correct: isCorrect,
+          idempotency_key: idempotencyKey,
           time_spent_seconds: 0,
         }),
       });
-      if (!response.ok) throw new Error('Failed to save quiz attempt');
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to save quiz attempt');
+
+      setSelectedAnswer(answer);
+      setShowResult(true);
+      setSessionResults((prev) => [...prev, { quizId: quiz.id, correct: data.is_correct === true }]);
       setQuizzes((previous) => previous.filter((item) => item.id !== quiz.id));
-    } catch {
-      // Keep the question visible if its attempt could not be recorded.
+      pendingAttempt.current = null;
+    } catch (error) {
+      setAnswerError(error instanceof Error ? error.message : 'Could not save your answer. Please try again.');
+    } finally {
+      setSavingAnswer(false);
     }
   }
 
@@ -148,14 +149,9 @@ export default function QuizzesPage() {
       setCurrentIndex((prev) => prev + 1);
       setSelectedAnswer(null);
       setShowResult(false);
-      setIsFlipped(false);
-      setFlashcardReadyId(null);
+      setAnswerError(null);
+      pendingAttempt.current = null;
     }
-  }
-
-  function gradeFlashcard(knewIt: boolean) {
-    submitAnswer(knewIt ? 'correct' : 'incorrect');
-    nextQuestion();
   }
 
   const currentQuiz = sessionQuizzes[currentIndex];
@@ -208,9 +204,11 @@ export default function QuizzesPage() {
               {Math.round((correctCount / sessionResults.length) * 100)}% correct
             </p>
             <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'center' }}>
-              <button className="btn btn-primary" onClick={() => startSession()}>
-                <RotateCcw size={16} /> Try Again
-              </button>
+              {filteredQuizzes.length > 0 && (
+                <button className="btn btn-primary" onClick={startSession}>
+                  <RotateCcw size={16} /> Next Session
+                </button>
+              )}
               <button className="btn btn-secondary" onClick={endSession}>
                 Back to Quizzes
               </button>
@@ -220,9 +218,7 @@ export default function QuizzesPage() {
 
         {/* Quiz Card */}
         {!sessionComplete && (
-          <>
-            {currentQuiz.format === 'multiple_choice' ? (
-              <div className="glass-card animate-in animate-in-1" style={{ padding: 'var(--space-8)', maxWidth: 720, margin: '0 auto' }}>
+          <div className="glass-card animate-in animate-in-1" style={{ padding: 'var(--space-8)', maxWidth: 720, margin: '0 auto' }}>
                 <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-4)' }}>
                   <span className="badge badge-processing">Multiple Choice</span>
                   <span className="badge badge-pending">{currentQuiz.difficulty}</span>
@@ -236,8 +232,7 @@ export default function QuizzesPage() {
                   {currentQuiz.question}
                 </div>
                 <div>
-                  {currentQuiz.options?.map((option, idx) => {
-                    const labels = ['A', 'B', 'C', 'D', 'E'];
+                  {currentQuiz.options.map((option, idx) => {
                     let optionClass = 'quiz-option';
                     if (showResult) {
                       if (option.is_correct) optionClass += ' correct';
@@ -250,9 +245,9 @@ export default function QuizzesPage() {
                       <div
                         key={idx}
                         className={optionClass}
-                        onClick={() => !showResult && submitAnswer(option.text)}
+                        onClick={() => !showResult && !savingAnswer && submitAnswer(option.text)}
                       >
-                        <span className="quiz-option-label">{labels[idx]}</span>
+                        <span className="quiz-option-label">{option.label}</span>
                         <span>{option.text}</span>
                         {showResult && option.is_correct && (
                           <CheckCircle2 size={16} style={{ marginLeft: 'auto', color: 'var(--accent-emerald)' }} />
@@ -277,6 +272,23 @@ export default function QuizzesPage() {
                     <strong style={{ color: 'var(--accent-blue-light)' }}>Explanation:</strong> {currentQuiz.explanation}
                   </div>
                 )}
+                {answerError && (
+                  <div style={{ marginTop: 'var(--space-4)' }}>
+                    <p role="alert" style={{ color: 'var(--accent-rose)', fontSize: 'var(--text-sm)' }}>
+                      {answerError}
+                    </p>
+                    {selectedAnswer && (
+                      <button className="btn btn-secondary" onClick={() => void submitAnswer(selectedAnswer)}>
+                        Retry saving
+                      </button>
+                    )}
+                  </div>
+                )}
+                {savingAnswer && (
+                  <p style={{ marginTop: 'var(--space-4)', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)' }}>
+                    Saving answer...
+                  </p>
+                )}
                 {showResult && (
                   <div style={{ marginTop: 'var(--space-6)', display: 'flex', justifyContent: 'flex-end' }}>
                     <button className="btn btn-primary" onClick={nextQuestion}>
@@ -285,60 +297,6 @@ export default function QuizzesPage() {
                   </div>
                 )}
               </div>
-            ) : (
-              /* Flashcard */
-              <div style={{ maxWidth: 600, margin: '0 auto' }}>
-                <button
-                  type="button"
-                  key={currentQuiz.id}
-                  className={`flashcard ${isFlipped ? 'flipped' : ''} ${flashcardReadyId === currentQuiz.id ? '' : 'flashcard-no-transition'}`}
-                  onClick={() => setIsFlipped(true)}
-                  aria-pressed={isFlipped}
-                  aria-label={isFlipped ? 'Flashcard answer' : 'Show flashcard answer'}
-                >
-                  <div className="flashcard-inner">
-                    <div className="flashcard-face flashcard-front">
-                      <div className="flashcard-label">Question</div>
-                      {currentQuiz.stem && currentQuiz.is_testlet && (
-                        <div style={{ marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)', whiteSpace: 'pre-wrap' }}>
-                          <strong>Shared scenario:</strong>{'\n'}{currentQuiz.stem}
-                        </div>
-                      )}
-                      <div className="flashcard-text">{currentQuiz.question}</div>
-                      <div style={{ marginTop: 'var(--space-6)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-                        Click to reveal answer
-                      </div>
-                    </div>
-                    <div className="flashcard-face flashcard-back">
-                      <div className="flashcard-label">Answer</div>
-                      <div className="flashcard-text">
-                        {currentQuiz.answer || currentQuiz.explanation || 'No answer saved for this card.'}
-                      </div>
-                    </div>
-                  </div>
-                </button>
-
-                {isFlipped && (
-                  <div className="animate-in" style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-3)', marginTop: 'var(--space-6)' }}>
-                    <button
-                      type="button"
-                      className="btn btn-danger"
-                      onClick={() => gradeFlashcard(false)}
-                    >
-                      <XCircle size={16} /> Didn&apos;t Know
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-success"
-                      onClick={() => gradeFlashcard(true)}
-                    >
-                      <CheckCircle2 size={16} /> Got It!
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </>
         )}
       </div>
     );
@@ -401,17 +359,9 @@ export default function QuizzesPage() {
             <div
               key={quiz.id}
               className="glass-card quiz-card"
-              onClick={
-                quiz.format === 'flashcard'
-                  ? () => setPreviewFlipIds((prev) => ({ ...prev, [quiz.id]: !prev[quiz.id] }))
-                  : undefined
-              }
-              style={quiz.format === 'flashcard' ? { cursor: 'pointer' } : undefined}
             >
               <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-                <span className="badge badge-processing">
-                  {quiz.format === 'multiple_choice' ? 'MC' : 'Flash'}
-                </span>
+                <span className="badge badge-processing">MC</span>
                 <span className="badge badge-pending">{quiz.difficulty}</span>
                 {quiz.topic && (
                   <span className="chip" style={{ fontSize: '0.65rem' }}>
@@ -420,24 +370,13 @@ export default function QuizzesPage() {
                 )}
               </div>
               <div className="quiz-card-question">
-                {quiz.format === 'flashcard' && previewFlipIds[quiz.id] ? (
-                  quiz.answer || quiz.explanation || 'No answer saved for this card.'
-                ) : (
-                  <>
-                    {quiz.stem && quiz.is_testlet && (
-                      <div style={{ marginBottom: 'var(--space-3)', color: 'var(--text-secondary)', fontSize: 'var(--text-xs)', whiteSpace: 'pre-wrap' }}>
-                        <strong>Shared scenario:</strong>{'\n'}{quiz.stem}
-                      </div>
-                    )}
-                    {quiz.question.length > 150 ? quiz.question.slice(0, 150) + '...' : quiz.question}
-                  </>
+                {quiz.stem && quiz.is_testlet && (
+                  <div style={{ marginBottom: 'var(--space-3)', color: 'var(--text-secondary)', fontSize: 'var(--text-xs)', whiteSpace: 'pre-wrap' }}>
+                    <strong>Shared scenario:</strong>{'\n'}{quiz.stem}
+                  </div>
                 )}
+                {quiz.question.length > 150 ? quiz.question.slice(0, 150) + '...' : quiz.question}
               </div>
-              {quiz.format === 'flashcard' && (
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 'var(--space-2)' }}>
-                  {previewFlipIds[quiz.id] ? 'Click to hide answer' : 'Click to reveal answer'}
-                </div>
-              )}
             </div>
           ))}
         </div>

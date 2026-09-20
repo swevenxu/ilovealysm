@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getServerSupabase } from '@/lib/supabase';
 import { errorResponse, handleError } from '@/lib/api-utils';
-import crypto from 'crypto';
+import { questionHash } from '@/lib/question-hash';
+import { isMultipleChoiceOptions } from '@/lib/mcq';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,46 +30,43 @@ interface AttemptLogRow {
   question_id: string;
 }
 
-function questionHash(text: string): string {
-  const normalized = text
-    .toLowerCase()
-    .replace(/[^\w\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 16);
-}
-
 export async function GET() {
   const supabase = getServerSupabase();
   if (!supabase) return NextResponse.json({ quizzes: [] });
 
   try {
-    const [quizzesResult, attemptsResult] = await Promise.all([
-      supabase
-        .from('quizzes')
-        .select(`
+    const { data: quizzes, error: quizzesError } = await supabase
+      .from('quizzes')
+      .select(`
         id, file_id, topic_id, question, format, options, answer, explanation,
         source_page, stem, sub_questions, is_testlet, difficulty, source_quote, created_at,
         files:file_id(filename),
         topics:topic_id(name, icon)
         `)
-        .order('created_at', { ascending: false }),
-      supabase.from('attempt_log').select('question_id'),
-    ]);
+      .is('file_id', null)
+      .eq('format', 'multiple_choice')
+      .order('created_at', { ascending: false });
 
-    if (quizzesResult.error) return errorResponse(quizzesResult.error.message, 500);
-    if (attemptsResult.error) return errorResponse(attemptsResult.error.message, 500);
+    if (quizzesError) return errorResponse(quizzesError.message, 500);
+
+    const typedQuizzes = (quizzes || []) as QuizWithRelations[];
+    const questionIds = typedQuizzes.map((quiz) => questionHash(quiz.question));
+    const { data: attempts, error: attemptsError } = questionIds.length > 0
+      ? await supabase.from('attempt_log').select('question_id').in('question_id', questionIds)
+      : { data: [], error: null };
+
+    if (attemptsError) return errorResponse(attemptsError.message, 500);
 
     const answeredQuestionIds = new Set(
-      ((attemptsResult.data || []) as AttemptLogRow[]).map((attempt) => attempt.question_id),
+      ((attempts || []) as AttemptLogRow[]).map((attempt) => attempt.question_id),
     );
-    const typedQuizzes = (quizzesResult.data || []) as QuizWithRelations[];
     const shaped = typedQuizzes.filter(
-      (quiz) => !answeredQuestionIds.has(questionHash(quiz.question)),
+      (quiz) => isMultipleChoiceOptions(quiz.options)
+        && !answeredQuestionIds.has(questionHash(quiz.question)),
     ).map((q) => {
-      const file = Array.isArray(q.files) ? q.files[0] : q.files;
-      const topic = Array.isArray(q.topics) ? q.topics[0] : q.topics;
-      const { files: _, topics: __, ...rest } = q;
+      const { files, topics, ...rest } = q;
+      const file = Array.isArray(files) ? files[0] : files;
+      const topic = Array.isArray(topics) ? topics[0] : topics;
       return { ...rest, file, topic };
     });
 

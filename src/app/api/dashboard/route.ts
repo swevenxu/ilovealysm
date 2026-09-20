@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerSupabase } from '@/lib/supabase';
+import { latestAttempts } from '@/lib/attempts';
 import { PINNACLE_SUBJECTS } from '@/lib/pinnacle';
 import type { DashboardStats, SubjectMastery } from '@/types';
 
@@ -40,16 +41,17 @@ export async function GET() {
   try {
     const [topicsRes, questionsRes, attemptsRes, quizzesRes] = await Promise.all([
       supabase.from('topics').select('id, name'),
-      supabase.from('questions').select('id, topic_id'),
+      supabase.from('questions').select('id, topic_id').eq('format', 'multiple_choice'),
       supabase
         .from('attempt_log')
         .select('question_id, is_correct, answered_at')
         .order('answered_at', { ascending: false }),
-      supabase.from('quizzes').select('topic_id'),
+      supabase.from('quizzes').select('topic_id').is('file_id', null).eq('format', 'multiple_choice'),
     ]);
 
-    if (topicsRes.error) {
-      console.error('Dashboard API error:', topicsRes.error);
+    const databaseError = topicsRes.error || questionsRes.error || attemptsRes.error || quizzesRes.error;
+    if (databaseError) {
+      console.error('Dashboard API error:', databaseError);
       return NextResponse.json(emptyDashboard);
     }
 
@@ -66,10 +68,9 @@ export async function GET() {
     const qToTopic = new Map<string, string | null>();
     for (const q of questions) qToTopic.set(q.id, q.topic_id);
 
-    // latest attempt per question (first row wins, ordered DESC by answered_at)
+    // Use the same latest-answer rule as Review and Progress.
     const latest = new Map<string, { topic_id: string | null; is_correct: boolean }>();
-    for (const a of attempts) {
-      if (latest.has(a.question_id)) continue;
+    for (const a of latestAttempts(attempts).values()) {
       latest.set(a.question_id, {
         topic_id: qToTopic.get(a.question_id) ?? null,
         is_correct: a.is_correct,

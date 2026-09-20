@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import {
     ChevronLeft,
@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 
 interface Option {
-    label: string;
+    label: 'A' | 'B' | 'C' | 'D';
     text: string;
     is_correct: boolean;
 }
@@ -24,8 +24,8 @@ interface Option {
 interface ReviewQuestion {
     id: string;
     question_text: string;
-    format: string;
-    options: Option[] | null;
+    format: 'multiple_choice';
+    options: Option[];
     correct_answer: string;
     explanation: string | null;
     difficulty: string | null;
@@ -77,7 +77,8 @@ export default function ReviewPage() {
     }, []);
 
     useEffect(() => {
-        load();
+        const timer = setTimeout(() => void load(), 0);
+        return () => clearTimeout(timer);
     }, [load]);
 
     const total = useMemo(() => groups.reduce((s, g) => s + g.count, 0), [groups]);
@@ -318,7 +319,9 @@ function ReviewSession({
     const [selected, setSelected] = useState<string | null>(null);
     const [revealed, setRevealed] = useState(false);
     const [answering, setAnswering] = useState(false);
+    const [answerError, setAnswerError] = useState<string | null>(null);
     const [results, setResults] = useState<boolean[]>([]);
+    const pendingAttempt = useRef<{ questionId: string; answer: string; key: string } | null>(null);
 
     const q = questions[index] ?? null;
     const complete = index >= questions.length;
@@ -326,24 +329,37 @@ function ReviewSession({
     const wrongCount = results.filter((r) => !r).length;
 
     async function submit(opt: Option) {
-        if (revealed || answering || !q) return;
+        if (revealed || answering || !q || (selected && selected !== opt.text)) return;
         setSelected(opt.text);
-        setRevealed(true);
         setAnswering(true);
-        setResults((prev) => [...prev, opt.is_correct]);
+        setAnswerError(null);
+
+        const existingAttempt = pendingAttempt.current;
+        const idempotencyKey = existingAttempt?.questionId === q.id && existingAttempt.answer === opt.text
+            ? existingAttempt.key
+            : crypto.randomUUID();
+        pendingAttempt.current = { questionId: q.id, answer: opt.text, key: idempotencyKey };
 
         try {
-            await fetch('/api/review', {
+            const response = await fetch('/api/review', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     question_id: q.id,
                     selected_answer: opt.text,
-                    is_correct: opt.is_correct,
+                    idempotency_key: idempotencyKey,
+                    time_spent_seconds: 0,
                 }),
             });
-        } catch (e) {
-            console.error(e);
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Could not save your answer');
+
+            setSelected(opt.text);
+            setRevealed(true);
+            setResults((prev) => [...prev, data.is_correct === true]);
+            pendingAttempt.current = null;
+        } catch (error) {
+            setAnswerError(error instanceof Error ? error.message : 'Could not save your answer. Please try again.');
         }
         setAnswering(false);
     }
@@ -351,6 +367,8 @@ function ReviewSession({
     function next() {
         setSelected(null);
         setRevealed(false);
+        setAnswerError(null);
+        pendingAttempt.current = null;
         setIndex((i) => i + 1);
     }
 
@@ -437,7 +455,6 @@ function ReviewSession({
                 <CompletionSummary
                     title={title}
                     results={results}
-                    questions={questions}
                     onExit={onExit}
                 />
             )}
@@ -498,8 +515,7 @@ function ReviewSession({
 
                     {/* Options */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-                        {q.options?.map((option, idx) => {
-                            const labels = ['A', 'B', 'C', 'D', 'E'];
+                        {q.options.map((option, idx) => {
                             let optionClass = 'quiz-option';
                             if (revealed) {
                                 if (option.is_correct) optionClass += ' correct';
@@ -512,10 +528,10 @@ function ReviewSession({
                                 <div
                                     key={idx}
                                     className={optionClass}
-                                    onClick={() => !revealed && submit(option)}
-                                    style={{ cursor: revealed ? 'default' : 'pointer' }}
+                                    onClick={() => !revealed && !answering && void submit(option)}
+                                    style={{ cursor: revealed || answering || (selected && selected !== option.text) ? 'default' : 'pointer' }}
                                 >
-                                    <span className="quiz-option-label">{labels[idx]}</span>
+                                    <span className="quiz-option-label">{option.label}</span>
                                     <span style={{ flex: 1, minWidth: 0 }}>{option.text}</span>
                                     {revealed && option.is_correct && (
                                         <CheckCircle2
@@ -541,6 +557,27 @@ function ReviewSession({
                             );
                         })}
                     </div>
+
+                    {answering && (
+                        <p style={{ marginTop: 'var(--space-4)', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)' }}>
+                            Saving answer...
+                        </p>
+                    )}
+                    {answerError && (
+                        <div style={{ marginTop: 'var(--space-4)' }}>
+                            <p role="alert" style={{ color: 'var(--accent-rose)', fontSize: 'var(--text-sm)' }}>
+                                {answerError}
+                            </p>
+                            {selected && (
+                                <button className="btn btn-secondary" onClick={() => {
+                                    const option = q.options.find((item) => item.text === selected);
+                                    if (option) void submit(option);
+                                }}>
+                                    Retry saving
+                                </button>
+                            )}
+                        </div>
+                    )}
 
                     {/* Explanation */}
                     {revealed && q.explanation && (
@@ -606,12 +643,10 @@ function ReviewSession({
 function CompletionSummary({
     title,
     results,
-    questions,
     onExit,
 }: {
     title: string;
     results: boolean[];
-    questions: ReviewQuestion[];
     onExit: () => void;
 }) {
     const total = results.length;

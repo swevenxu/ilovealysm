@@ -60,15 +60,15 @@ CREATE TABLE IF NOT EXISTS file_topics (
 );
 
 -- -----------------------------------------------------------
--- quizzes: generated questions (MC + flashcards)
+-- quizzes: static multiple-choice questions
 -- -----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS quizzes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   file_id UUID REFERENCES files(id) ON DELETE CASCADE,
   topic_id UUID REFERENCES topics(id),
   question TEXT NOT NULL,
-  format TEXT NOT NULL
-    CHECK (format IN ('multiple_choice', 'flashcard', 'true_false')),
+  format TEXT NOT NULL DEFAULT 'multiple_choice'
+    CHECK (format = 'multiple_choice'),
   options JSONB,
   answer TEXT NOT NULL,
   explanation TEXT,

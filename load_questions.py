@@ -35,7 +35,6 @@ HEDGE = re.compile(
 )
 
 DIFFICULTY_VALUES = {"easy", "medium", "hard"}
-VALID_FORMATS = {"multiple_choice", "true_false", "flashcard"}
 
 
 def normalize_block(block: str) -> str:
@@ -80,38 +79,15 @@ def parse_block(block: str, subject_code: str, index: int) -> dict | None:
     fmt_raw = (field(block, "Format") or "").strip().lower()
     diff_raw = (field(block, "Difficulty") or "").strip().lower()
 
-    if fmt_raw in DIFFICULTY_VALUES:
-        fmt = "multiple_choice"
-        difficulty = fmt_raw
-    elif fmt_raw in VALID_FORMATS:
-        fmt = fmt_raw
-        difficulty = diff_raw if diff_raw in DIFFICULTY_VALUES else "medium"
-    else:
-        fmt = "multiple_choice"
-        difficulty = diff_raw if diff_raw in DIFFICULTY_VALUES else "medium"
+    fmt = "multiple_choice"
+    difficulty = fmt_raw if fmt_raw in DIFFICULTY_VALUES else (
+        diff_raw if diff_raw in DIFFICULTY_VALUES else "medium"
+    )
 
     question = field(block, "Question")
     correct_raw = field(block, "Correct")
     explanation = field(block, "Explanation") or field(block, "Answer")
     source = field(block, "Source")
-
-    if fmt == "flashcard":
-        if not question or not explanation:
-            return None
-        return {
-            "subject": subject_code,
-            "format": "flashcard",
-            "difficulty": difficulty,
-            "question": question,
-            "options": None,
-            "answer": explanation,
-            "explanation": None,
-            "stem": None,
-            "sub_questions": None,
-            "is_testlet": False,
-            "source_quote": source,
-            "issues": [],
-        }
 
     issues: list[str] = []
     if not question:
@@ -119,35 +95,26 @@ def parse_block(block: str, subject_code: str, index: int) -> dict | None:
 
     correct = normalize_answer(correct_raw)
 
-    if fmt == "multiple_choice":
-        opts = {}
-        for L in ("A", "B", "C", "D"):
-            t = option_text(block, L)
-            if t is not None:
-                opts[L] = t
-        if len(opts) != 4:
-            issues.append(f"MCQ has {len(opts)} options (needs 4)")
+    opts = {}
+    for L in ("A", "B", "C", "D"):
+        t = option_text(block, L)
+        if t is not None:
+            opts[L] = t
+    if len(opts) != 4:
+        issues.append(f"MCQ has {len(opts)} options (needs 4)")
 
-        for L, t in opts.items():
-            if BANNED_OPTION.search(t):
-                issues.append(f"option {L} uses banned text")
+    for L, t in opts.items():
+        if BANNED_OPTION.search(t):
+            issues.append(f"option {L} uses banned text")
 
-        if not correct or correct not in opts:
-            issues.append(f"Correct '{correct_raw}' not in options")
+    if not correct or correct not in opts:
+        issues.append(f"Correct '{correct_raw}' not in options")
 
-        options_json = [
-            {"label": L, "text": opts[L], "is_correct": L == correct}
-            for L in ("A", "B", "C", "D")
-            if L in opts
-        ]
-    else:
-        if correct not in ("True", "False"):
-            issues.append(f"T/F correct is '{correct_raw}', not True/False")
-            correct = None
-        options_json = [
-            {"label": "A", "text": "True",  "is_correct": correct == "True"},
-            {"label": "B", "text": "False", "is_correct": correct == "False"},
-        ]
+    options_json = [
+        {"label": L, "text": opts[L], "is_correct": L == correct}
+        for L in ("A", "B", "C", "D")
+        if L in opts
+    ]
 
     if explanation and HEDGE.search(explanation):
         issues.append("explanation contains hedging language")
