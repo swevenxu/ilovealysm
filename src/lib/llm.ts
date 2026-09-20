@@ -1,42 +1,85 @@
 /**
- * LLM client with multi-provider failover.
+ * LLM client with multi-provider, multi-model failover.
  *
- * Order:
- *   1. NVIDIA NIM      (openai/gpt-oss-120b)
- *   2. Cerebras        (gpt-oss-120b)
- *   3. Mistral         (mistral-small-latest — 1 req/s free tier)
- *   4. Gemini          (emergency — 20 req/day)
- *   5. OpenRouter      (last resort)
+ * Provider order:
+ *   1. NVIDIA NIM      (primary)
+ *   2. Mistral         (secondary — 1 req/s free tier)
+ *   3. Gemini          (emergency — 20 req/day)
+ *   4. OpenRouter      (last resort)
+ *
+ * Within each provider, multiple models are tried in order.
+ * If a model is retired (410) or unavailable (404), the next one is used.
  */
 
 // ============================================================
-// Configuration
+// Configuration — model fallback chains
 // ============================================================
 
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '';
-const NVIDIA_MODEL = process.env.NVIDIA_MODEL || 'openai/gpt-oss-120b';
-
-const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY || '';
-const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || 'gpt-oss-120b';
+const NVIDIA_MODELS = (
+  process.env.NVIDIA_MODELS ||
+  process.env.NVIDIA_MODEL || // backward compat with single-model env
+  [
+    'nvidia/nemotron-3-super-120b-a12b',
+    'nvidia/nemotron-3-ultra-550b-a55b',
+    'nvidia/nemotron-3-nano-30b-a3b',
+    'meta/llama-3.3-70b-instruct',
+    'meta/llama-4-maverick',
+    'qwen/qwen3.5-397b-a17b',
+    'deepseek-ai/deepseek-v3.2',
+    'moonshotai/kimi-k2-instruct',
+  ].join(',')
+)
+  .split(',')
+  .map((m) => m.trim())
+  .filter(Boolean);
 
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || '';
-const MISTRAL_MODEL = process.env.MISTRAL_MODEL || 'mistral-small-latest';
+const MISTRAL_MODELS = (
+  process.env.MISTRAL_MODELS ||
+  process.env.MISTRAL_MODEL ||
+  [
+    'mistral-small-latest',
+    'mistral-medium-latest',
+    'magistral-small-latest',
+    'open-mistral-7b',
+  ].join(',')
+)
+  .split(',')
+  .map((m) => m.trim())
+  .filter(Boolean);
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
-
-const DEFAULT_OPENROUTER_MODELS = [
-  'nex-agi/nex-n2.5-mini:free',
-  'liquid/lfm-2.5-2.6b:free',
-  'qwen/qwen3.8-27b:free',
-  'google/gemma-4-26b-a4b-it:free',
-];
-const OPENROUTER_MODELS = (process.env.OPENROUTER_MODELS || process.env.OPENROUTER_MODEL || '')
+const GEMINI_MODELS = (
+  process.env.GEMINI_MODELS ||
+  process.env.GEMINI_MODEL ||
+  [
+    'gemini-3.5-flash-lite',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+  ].join(',')
+)
   .split(',')
-  .map((model) => model.trim())
+  .map((m) => m.trim())
   .filter(Boolean);
-const OPENROUTER_MODEL_LIST =
-  OPENROUTER_MODELS.length > 0 ? OPENROUTER_MODELS : DEFAULT_OPENROUTER_MODELS;
+
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
+const OPENROUTER_MODELS = (
+  process.env.OPENROUTER_MODELS ||
+  process.env.OPENROUTER_MODEL ||
+  [
+    'openrouter/free',
+    'qwen/qwen3.6-plus:free',
+    'meta-llama/llama-3.3-70b-instruct:free',
+    'nvidia/nemotron-3-super-120b-a12b:free',
+    'openai/gpt-oss-120b:free',
+    'z-ai/glm-4.5-air:free',
+    'google/gemma-4-26b-a4b-it:free',
+  ].join(',')
+)
+  .split(',')
+  .map((m) => m.trim())
+  .filter(Boolean);
 
 // ============================================================
 // Shared OpenAI-compatible chat call
@@ -94,12 +137,13 @@ async function callOpenAICompatible(
 async function callNvidia(
   systemPrompt: string,
   userContent: string,
+  model: string,
   options: LLMOptions = {},
 ): Promise<string> {
   return callOpenAICompatible(
     'https://integrate.api.nvidia.com/v1/chat/completions',
     NVIDIA_API_KEY,
-    options.model || NVIDIA_MODEL,
+    model,
     systemPrompt,
     userContent,
     options,
@@ -108,27 +152,7 @@ async function callNvidia(
 }
 
 // ============================================================
-// Cerebras (secondary)
-// ============================================================
-
-async function callCerebras(
-  systemPrompt: string,
-  userContent: string,
-  options: LLMOptions = {},
-): Promise<string> {
-  return callOpenAICompatible(
-    'https://api.cerebras.ai/v1/chat/completions',
-    CEREBRAS_API_KEY,
-    options.model || CEREBRAS_MODEL,
-    systemPrompt,
-    userContent,
-    options,
-    'Cerebras',
-  );
-}
-
-// ============================================================
-// Mistral (tertiary — 1 req/s free tier, throttled)
+// Mistral (secondary — 1 req/s free tier, throttled)
 // ============================================================
 
 let lastMistralCallAt = 0;
@@ -136,6 +160,7 @@ let lastMistralCallAt = 0;
 async function callMistral(
   systemPrompt: string,
   userContent: string,
+  model: string,
   options: LLMOptions = {},
 ): Promise<string> {
   const now = Date.now();
@@ -148,7 +173,7 @@ async function callMistral(
   return callOpenAICompatible(
     'https://api.mistral.ai/v1/chat/completions',
     MISTRAL_API_KEY,
-    options.model || MISTRAL_MODEL,
+    model,
     systemPrompt,
     userContent,
     options,
@@ -163,17 +188,18 @@ async function callMistral(
 async function callGemini(
   systemPrompt: string,
   userContent: string,
+  model: string,
   options: LLMOptions = {},
 ): Promise<string> {
   const { GoogleGenerativeAI } = await import('@google/generative-ai');
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
-  const model = genAI.getGenerativeModel({
-    model: options.geminiModel || process.env.GEMINI_MODEL || 'gemini-3.6-flash',
+  const gm = genAI.getGenerativeModel({
+    model,
     systemInstruction: systemPrompt,
   });
 
-  const result = await model.generateContent(userContent);
+  const result = await gm.generateContent(userContent);
   return result.response.text();
 }
 
@@ -187,7 +213,7 @@ async function callOpenRouter(
   model: string,
   options: LLMOptions = {},
 ): Promise<string> {
-  if (!model.endsWith(':free')) {
+  if (!model.endsWith(':free') && model !== 'openrouter/free') {
     throw new Error(`OpenRouter model must be free: ${model}`);
   }
 
@@ -237,79 +263,78 @@ export interface LLMOptions {
   forceGemini?: boolean;
 }
 
-export type LLMProvider = 'nvidia' | 'cerebras' | 'mistral' | 'gemini' | 'openrouter';
+export type LLMProvider = 'nvidia' | 'mistral' | 'gemini' | 'openrouter';
 
 export async function llmGenerate(
   systemPrompt: string,
   userContent: string,
   options: LLMOptions = {},
-): Promise<{ text: string; provider: LLMProvider }> {
+): Promise<{ text: string; provider: LLMProvider; model: string }> {
   const failures: string[] = [];
 
   // ---------- 1. NVIDIA NIM ----------
   if (NVIDIA_API_KEY && !options.forceGemini) {
-    try {
-      const text = await callNvidia(systemPrompt, userContent, options);
-      return { text, provider: 'nvidia' };
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.error('[LLM] NVIDIA NIM error:', error);
-      failures.push(`NVIDIA: ${msg.slice(0, 200)}`);
+    const models = options.model ? [options.model] : NVIDIA_MODELS;
+    for (const model of models) {
+      try {
+        const text = await callNvidia(systemPrompt, userContent, model, options);
+        return { text, provider: 'nvidia', model };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[LLM] NVIDIA model ${model} failed:`, error);
+        failures.push(`NVIDIA(${model}): ${msg.slice(0, 150)}`);
+
+        // Retired model — try the next one. Quota/network errors — also try next.
+      }
     }
   }
 
-  // ---------- 2. Cerebras ----------
-  if (CEREBRAS_API_KEY && !options.forceGemini) {
-    try {
-      const text = await callCerebras(systemPrompt, userContent, options);
-      return { text, provider: 'cerebras' };
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.error('[LLM] Cerebras error:', error);
-      failures.push(`Cerebras: ${msg.slice(0, 200)}`);
-    }
-  }
-
-  // ---------- 3. Mistral ----------
+  // ---------- 2. Mistral ----------
   if (MISTRAL_API_KEY && !options.forceGemini) {
-    try {
-      const text = await callMistral(systemPrompt, userContent, options);
-      return { text, provider: 'mistral' };
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.error('[LLM] Mistral error:', error);
-      failures.push(`Mistral: ${msg.slice(0, 200)}`);
+    const models = options.model ? [options.model] : MISTRAL_MODELS;
+    for (const model of models) {
+      try {
+        const text = await callMistral(systemPrompt, userContent, model, options);
+        return { text, provider: 'mistral', model };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[LLM] Mistral model ${model} failed:`, error);
+        failures.push(`Mistral(${model}): ${msg.slice(0, 150)}`);
+      }
     }
   }
 
-  // ---------- 4. Gemini ----------
+  // ---------- 3. Gemini ----------
   if (GEMINI_API_KEY) {
-    try {
-      const text = await callGemini(systemPrompt, userContent, options);
-      return { text, provider: 'gemini' };
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.error('[LLM] Gemini error:', error);
-      failures.push(`Gemini: ${msg.slice(0, 200)}`);
+    const models = options.geminiModel ? [options.geminiModel] : GEMINI_MODELS;
+    for (const model of models) {
+      try {
+        const text = await callGemini(systemPrompt, userContent, model, options);
+        return { text, provider: 'gemini', model };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[LLM] Gemini model ${model} failed:`, error);
+        failures.push(`Gemini(${model}): ${msg.slice(0, 150)}`);
 
-      if (options.forceGemini) {
-        throw new Error(`Gemini failed (forceGemini=true): ${msg}`);
+        if (options.forceGemini) {
+          throw new Error(`Gemini failed (forceGemini=true): ${msg}`);
+        }
       }
     }
   } else if (options.forceGemini) {
     throw new Error('forceGemini requested but GEMINI_API_KEY is not set.');
   }
 
-  // ---------- 5. OpenRouter ----------
+  // ---------- 4. OpenRouter ----------
   if (OPENROUTER_API_KEY && !options.forceGemini) {
-    for (const model of OPENROUTER_MODEL_LIST) {
+    for (const model of OPENROUTER_MODELS) {
       try {
         const text = await callOpenRouter(systemPrompt, userContent, model, options);
-        return { text, provider: 'openrouter' };
+        return { text, provider: 'openrouter', model };
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         console.error(`[LLM] OpenRouter model ${model} failed:`, error);
-        failures.push(`OpenRouter(${model}): ${msg.slice(0, 200)}`);
+        failures.push(`OpenRouter(${model}): ${msg.slice(0, 150)}`);
 
         if (
           msg.includes('openrouter_free_tier_daily') ||
@@ -327,7 +352,7 @@ export async function llmGenerate(
   // ---------- All failed ----------
   const detail = failures.length ? ` Tried: ${failures.join(' | ')}` : '';
   throw new Error(
-    `All LLM providers failed (NVIDIA → Cerebras → Mistral → Gemini → OpenRouter).${detail}`,
+    `All LLM providers failed (NVIDIA → Mistral → Gemini → OpenRouter).${detail}`,
   );
 }
 
@@ -354,9 +379,12 @@ export function chunkText(text: string, maxCharsPerChunk: number = 8000): string
 export function getRateLimitStatus() {
   return {
     hasNvidiaKey: !!NVIDIA_API_KEY,
-    hasCerebrasKey: !!CEREBRAS_API_KEY,
     hasMistralKey: !!MISTRAL_API_KEY,
     hasGeminiKey: !!GEMINI_API_KEY,
     hasOpenRouterKey: !!OPENROUTER_API_KEY,
+    nvidiaModelCount: NVIDIA_MODELS.length,
+    mistralModelCount: MISTRAL_MODELS.length,
+    geminiModelCount: GEMINI_MODELS.length,
+    openrouterModelCount: OPENROUTER_MODELS.length,
   };
 }
