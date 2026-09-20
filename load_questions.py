@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+"""
+Parse CPA review .md files -> Supabase INSERT SQL.
+Robust against:
+  - literal \\n characters in the source
+  - Format/Difficulty field swap
+  - apostrophes and quotes in question/option/explanation text
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+DATA_DIR = Path("src/data")
+OUT_SQL = Path("load_questions.sql")
+OUT_REPORT = Path("load_questions_report.txt")
+
+SUBJECT_TO_TOPIC = {
+    "far":  "Financial Accounting and Reporting",
+    "afar": "Advanced Financial Accounting and Reporting",
+    "ms":   "Management Services",
+    "at":   "Auditing Theory",
+    "ap":   "Auditing Practice",
+    "tax":  "Taxation",
+    "rfbt": "Regulatory Framework for Business Transactions",
+}
+
+BANNED_OPTION = re.compile(r"\b(all|none)\s+of\s+the\s+above\b", re.IGNORECASE)
+HEDGE = re.compile(
+    r"\b(wait|let me recalculate|let me check|actually|hmm|closest is|based on the options|the question is flawed)\b",
+    re.IGNORECASE,
+)
+
+DIFFICULTY_VALUES = {"easy", "medium", "hard"}
+VALID_FORMATS = {"multiple_choice", "true_false", "flashcard"}
+
+
+def normalize_block(block: str) -> str:
+    return block.replace("\\n", "\n")
+
+
+def split_blocks(text: str) -> list[str]:
+    parts = re.split(r"(?m)^#{2,3}\s*Q\d+\s*$", text)
+    return [p for p in parts[1:] if p.strip()]
+
+
+def field(block: str, name: str) -> str | None:
+    # Stop at ANY next **...** at line start (handles **A.**, **Correct:**, etc.)
+    pattern = rf"\*\*{re.escape(name)}:\*\*\s*(.*?)(?=\n\s*\*\*[^*\n]+\*\*|\Z)"
+    m = re.search(pattern, block, re.DOTALL)
+    if not m:
+        return None
+    return m.group(1).strip()
+
+
+def option_text(block: str, letter: str) -> str | None:
+    pattern = rf"(?m)^\s*\*\*{letter}\.\*\*\s*(.+?)\s*$"
+    m = re.search(pattern, block)
+    return m.group(1).strip() if m else None
+
+
+def normalize_answer(raw: str) -> str | None:
+    if not raw:
+        return None
+    raw = raw.strip()
+    m = re.match(r"^([A-D])\b", raw)
+    if m:
+        return m.group(1)
+    if raw.lower() in ("true", "false"):
+        return raw.capitalize()
+    return raw
+
+
+def parse_block(block: str, subject_code: str, index: int) -> dict | None:
+    block = normalize_block(block)
+
+    fmt_raw = (field(block, "Format") or "").strip().lower()
+    diff_raw = (field(block, "Difficulty") or "").strip().lower()
+
+    if fmt_raw in DIFFICULTY_VALUES:
+        fmt = "multiple_choice"
+        difficulty = fmt_raw
+    elif fmt_raw in VALID_FORMATS:
+        fmt = fmt_raw
+        difficulty = diff_raw if diff_raw in DIFFICULTY_VALUES else "medium"
+    else:
+        fmt = "multiple_choice"
+        difficulty = diff_raw if diff_raw in DIFFICULTY_VALUES else "medium"
+
+    question = field(block, "Question")
+    correct_raw = field(block, "Correct")
+    explanation = field(block, "Explanation") or field(block, "Answer")
+    source = field(block, "Source")
+
+    if fmt == "flashcard":
+        if not question or not explanation:
+            return None
+        return {
+            "subject": subject_code,
+            "format": "flashcard",
+            "difficulty": difficulty,
+            "question": question,
+            "options": None,
+            "answer": explanation,
+            "explanation": None,
+            "stem": None,
+            "sub_questions": None,
+            "is_testlet": False,
+            "source_quote": source,
+            "issues": [],
+        }
+
+    issues: list[str] = []
+    if not question:
+        return None
+
+    correct = normalize_answer(correct_raw)
+
+    if fmt == "multiple_choice":
+        opts = {}
+        for L in ("A", "B", "C", "D"):
+            t = option_text(block, L)
+            if t is not None:
+                opts[L] = t
+        if len(opts) != 4:
+            issues.append(f"MCQ has {len(opts)} options (needs 4)")
+
+        for L, t in opts.items():
+            if BANNED_OPTION.search(t):
+                issues.append(f"option {L} uses banned text")
+
+        if not correct or correct not in opts:
+            issues.append(f"Correct '{correct_raw}' not in options")
+
+        options_json = [
+            {"label": L, "text": opts[L], "is_correct": L == correct}
+            for L in ("A", "B", "C", "D")
+            if L in opts
+        ]
+    else:
+        if correct not in ("True", "False"):
+            issues.append(f"T/F correct is '{correct_raw}', not True/False")
+            correct = None
+        options_json = [
+            {"label": "A", "text": "True",  "is_correct": correct == "True"},
+            {"label": "B", "text": "False", "is_correct": correct == "False"},
+        ]
+
+    if explanation and HEDGE.search(explanation):
+        issues.append("explanation contains hedging language")
+
+    if not source:
+        issues.append("missing source_quote")
+
+    return {
+        "subject": subject_code,
+        "format": fmt,
+        "difficulty": difficulty,
+        "question": question,
+        "options": options_json,
+        "answer": correct or correct_raw or "",
+        "explanation": explanation,
+        "stem": None,
+        "sub_questions": None,
+        "is_testlet": False,
+        "source_quote": source,
+        "issues": issues,
+    }
+
+
+def sql_escape(s: str | None) -> str:
+    """Dollar-quote a string. Immune to quotes, backslashes, and newlines."""
+    if s is None:
+        return "NULL"
+    tag = "$q$"
+    while tag in s:
+        tag = "$" + tag.strip("$") + "q$"
+    return tag + s + tag
+
+
+def json_escape(obj) -> str:
+    """Dollar-quoted JSON cast to jsonb."""
+    if obj is None:
+        return "NULL"
+    payload = json.dumps(obj, ensure_ascii=False)
+    tag = "$j$"
+    while tag in payload:
+        tag = "$" + tag.strip("$") + "j$"
+    return tag + payload + tag + "::jsonb"
+
+
+def emit_sql(rows: list[dict]) -> str:
+    lines = [
+        "-- Auto-generated by load_questions.py",
+        "-- Loads static CPA review questions into the quizzes table.",
+        "-- file_id is NULL so regeneration does not delete them.",
+        "BEGIN;",
+        "",
+    ]
+    for r in rows:
+        topic_name = SUBJECT_TO_TOPIC[r["subject"]]
+        topic_sub = f"(SELECT id FROM topics WHERE name = {sql_escape(topic_name)} LIMIT 1)"
+        values = [
+            "NULL",
+            topic_sub,
+            sql_escape(r["question"]),
+            sql_escape(r["format"]),
+            json_escape(r["options"]),
+            sql_escape(r["answer"]),
+            sql_escape(r["explanation"]),
+            "NULL",
+            "NULL",
+            "NULL",
+            "FALSE",
+            sql_escape(r["difficulty"]),
+            sql_escape(r["source_quote"]),
+        ]
+        lines.append(
+            "INSERT INTO quizzes (file_id, topic_id, question, format, options, answer, "
+            "explanation, source_page, stem, sub_questions, is_testlet, difficulty, source_quote)"
+        )
+        lines.append("VALUES (" + ", ".join(values) + ");")
+        lines.append("")
+    lines.append("COMMIT;")
+    return "\n".join(lines)
+
+
+def main() -> int:
+    if not DATA_DIR.is_dir():
+        print(f"error: {DATA_DIR} not found", file=sys.stderr)
+        return 2
+
+    all_rows: list[dict] = []
+    dropped: list[tuple[str, int, list[str]]] = []
+    report: list[str] = []
+
+    for code in SUBJECT_TO_TOPIC:
+        path = DATA_DIR / f"{code}.md"
+        if not path.is_file():
+            report.append(f"[{code}] MISSING: {path}")
+            continue
+
+        text = path.read_text(encoding="utf-8")
+        blocks = split_blocks(text)
+        kept = 0
+        for i, block in enumerate(blocks, start=1):
+            row = parse_block(block, code, i)
+            if row is None:
+                dropped.append((code, i, ["unparseable"]))
+                continue
+            if row["issues"]:
+                q_snip = (row["question"] or "")[:70].replace("\n", " ")
+                dropped.append((code, i, row["issues"] + [f"| {q_snip}"]))
+                continue
+            all_rows.append(row)
+            kept += 1
+
+        report.append(f"[{code}] parsed {len(blocks)} blocks -> kept {kept}")
+
+    OUT_SQL.write_text(emit_sql(all_rows), encoding="utf-8")
+
+    report.append("")
+    report.append(f"TOTAL KEPT: {len(all_rows)}")
+    report.append(f"TOTAL DROPPED: {len(dropped)}")
+    report.append("")
+    report.append("Dropped items:")
+    for code, idx, issues in dropped:
+        report.append(f"  {code.upper()} Q{idx}: {'; '.join(issues)}")
+
+    OUT_REPORT.write_text("\n".join(report), encoding="utf-8")
+
+    print(f"Wrote {OUT_SQL} ({len(all_rows)} questions)")
+    print(f"Wrote {OUT_REPORT}")
+    print()
+    for line in report:
+        if line.startswith("[") or line.startswith("TOTAL"):
+            print(" ", line)
+    print()
+    print(f"See {OUT_REPORT} for the drop list.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
