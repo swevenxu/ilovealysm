@@ -1,0 +1,14 @@
+[far] parsed 100 blocks -> kept 100
+[afar] parsed 100 blocks -> kept 100
+[ms] parsed 100 blocks -> kept 99
+[at] parsed 100 blocks -> kept 100
+[ap] parsed 78 blocks -> kept 77
+[tax] parsed 100 blocks -> kept 100
+[rfbt] parsed 100 blocks -> kept 100
+
+TOTAL KEPT: 676
+TOTAL DROPPED: 2
+
+Dropped items:
+  MS Q64: option D uses banned text; | The sum of material mix and material yield variances equals:
+  AP Q26: explanation contains hedging language; | A truck was sold during the year. Which procedure should the auditor p

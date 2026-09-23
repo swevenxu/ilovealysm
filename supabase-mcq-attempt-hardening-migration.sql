@@ -1,5 +1,8 @@
 -- MCQ-only study flow hardening.
 -- Apply after supabase-attempt-log-migration.sql.
+-- Re-runnable: drops + recreates the attempt RPCs, which now also return
+-- correct_answer and explanation (sent to the UI only after an answer is
+-- recorded, so the correct answer is never exposed before answering).
 
 BEGIN;
 
@@ -68,13 +71,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_attempt_log_idempotency_key
   ON attempt_log(idempotency_key)
   WHERE idempotency_key IS NOT NULL;
 
+-- Return type changed (adds correct_answer, explanation). Postgres cannot
+-- CREATE OR REPLACE a function whose return type changed, so drop first.
+DROP FUNCTION IF EXISTS record_multiple_choice_attempt(TEXT, TEXT, UUID, INTEGER);
+DROP FUNCTION IF EXISTS record_quiz_attempt(UUID, TEXT, TEXT, UUID, INTEGER);
+
 CREATE OR REPLACE FUNCTION record_multiple_choice_attempt(
   p_question_id TEXT,
   p_selected_answer TEXT,
   p_idempotency_key UUID,
   p_time_spent_seconds INTEGER DEFAULT NULL
 )
-RETURNS TABLE (attempt_id UUID, question_id TEXT, is_correct BOOLEAN)
+RETURNS TABLE (attempt_id UUID, question_id TEXT, is_correct BOOLEAN, correct_answer TEXT, explanation TEXT)
 LANGUAGE plpgsql
 SET search_path = public
 AS $$
@@ -82,27 +90,36 @@ DECLARE
   v_options JSONB;
   v_is_correct BOOLEAN;
   v_is_valid_answer BOOLEAN;
+  v_explanation TEXT;
 BEGIN
   IF p_idempotency_key IS NULL THEN
     RAISE EXCEPTION 'idempotency key is required';
   END IF;
 
-  SELECT a.id, a.question_id, a.is_correct
-  INTO attempt_id, question_id, is_correct
-  FROM attempt_log a
-  WHERE a.idempotency_key = p_idempotency_key;
-  IF FOUND THEN
-    RETURN NEXT;
-    RETURN;
-  END IF;
-
-  SELECT q.options INTO v_options
+  SELECT q.options, q.explanation INTO v_options, v_explanation
   FROM questions q
   WHERE q.id = p_question_id
     AND q.format = 'multiple_choice';
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'question not found';
+  END IF;
+
+  -- Idempotent replay: return the already-recorded attempt (with reveal data).
+  SELECT a.id, a.question_id, a.is_correct
+  INTO attempt_id, question_id, is_correct
+  FROM attempt_log a
+  WHERE a.idempotency_key = p_idempotency_key;
+  IF FOUND THEN
+    correct_answer := (
+      SELECT option_value ->> 'text'
+      FROM jsonb_array_elements(v_options) AS option_value
+      WHERE option_value ->> 'is_correct' = 'true'
+      LIMIT 1
+    );
+    explanation := v_explanation;
+    RETURN NEXT;
+    RETURN;
   END IF;
 
   IF NOT is_valid_multiple_choice_options(v_options) THEN
@@ -144,11 +161,20 @@ BEGIN
   INTO attempt_id, question_id, is_correct;
 
   IF NOT FOUND THEN
+    -- Concurrent insert won the race on the idempotency key; replay it.
     SELECT a.id, a.question_id, a.is_correct
     INTO attempt_id, question_id, is_correct
     FROM attempt_log a
     WHERE a.idempotency_key = p_idempotency_key;
   END IF;
+
+  correct_answer := (
+    SELECT option_value ->> 'text'
+    FROM jsonb_array_elements(v_options) AS option_value
+    WHERE option_value ->> 'is_correct' = 'true'
+    LIMIT 1
+  );
+  explanation := v_explanation;
 
   RETURN NEXT;
 END;
@@ -161,7 +187,7 @@ CREATE OR REPLACE FUNCTION record_quiz_attempt(
   p_idempotency_key UUID,
   p_time_spent_seconds INTEGER DEFAULT NULL
 )
-RETURNS TABLE (attempt_id UUID, question_id TEXT, is_correct BOOLEAN)
+RETURNS TABLE (attempt_id UUID, question_id TEXT, is_correct BOOLEAN, correct_answer TEXT, explanation TEXT)
 LANGUAGE plpgsql
 SET search_path = public
 AS $$

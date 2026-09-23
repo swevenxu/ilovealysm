@@ -18,8 +18,6 @@ interface QuestionRow {
     question_text: string;
     format: string;
     options: unknown;
-    correct_answer: string;
-    explanation: string | null;
     difficulty: string | null;
     stem: string | null;
     sub_questions: unknown;
@@ -43,9 +41,12 @@ export async function GET() {
                 .from('attempt_log')
                 .select('question_id, is_correct, answered_at')
                 .order('answered_at', { ascending: false }),
+            // NOTE: correct_answer/explanation are intentionally NOT selected so
+            // they never reach the browser before an answer is recorded. They are
+            // revealed by the POST response after grading.
             supabase
                 .from('questions')
-                .select('id, topic_id, question_text, format, options, correct_answer, explanation, difficulty, stem, sub_questions, is_testlet, source_quote')
+                .select('id, topic_id, question_text, format, options, difficulty, stem, sub_questions, is_testlet, source_quote')
                 .eq('format', 'multiple_choice'),
             supabase.from('topics').select('id, name, color'),
         ]);
@@ -92,9 +93,9 @@ export async function GET() {
                     id: q.id,
                     question_text: q.question_text,
                     format: q.format,
-                    options: q.options,
-                    correct_answer: q.correct_answer,
-                    explanation: q.explanation,
+                    options: (q.options as { label: string; text: string; is_correct: boolean }[]).map(
+                        ({ label, text }) => ({ label, text }),
+                    ),
                     difficulty: q.difficulty,
                     stem: q.stem,
                     sub_questions: q.sub_questions,
@@ -137,7 +138,15 @@ export async function POST(request: NextRequest) {
         if (error) return NextResponse.json({ error: error.message }, { status: 400 });
         const attempt = (data || [])[0] as AttemptResult | undefined;
         if (!attempt) return NextResponse.json({ error: 'Attempt could not be recorded' }, { status: 500 });
-        return NextResponse.json(attempt);
+
+        // Reveal data is only returned AFTER the answer has been recorded.
+        return NextResponse.json({
+            attempt_id: attempt.attempt_id,
+            question_id: attempt.question_id,
+            is_correct: attempt.is_correct,
+            correct_answer: attempt.correct_answer,
+            explanation: attempt.explanation,
+        });
     } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : 'Unknown error';
         console.error('review POST error:', msg);
@@ -149,4 +158,6 @@ interface AttemptResult {
     attempt_id: string;
     question_id: string;
     is_correct: boolean;
+    correct_answer: string | null;
+    explanation: string | null;
 }

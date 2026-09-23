@@ -10,15 +10,18 @@ import {
   ChevronLeft,
 } from 'lucide-react';
 
+interface QuizOptionView {
+  label: 'A' | 'B' | 'C' | 'D';
+  text: string;
+}
+
 interface Quiz {
   id: string;
   file_id: string | null;
   topic_id: string | null;
   question: string;
   format: 'multiple_choice';
-  options: { label: 'A' | 'B' | 'C' | 'D'; text: string; is_correct: boolean }[];
-  answer: string;
-  explanation: string | null;
+  options: QuizOptionView[];
   source_page: number | null;
   stem: string | null;
   sub_questions: { number: number; text: string }[] | null;
@@ -26,6 +29,13 @@ interface Quiz {
   difficulty: string;
   topic?: { name: string; icon: string };
   file?: { filename: string };
+}
+
+/** Reveal data, sent by the server only after an answer is recorded. */
+interface AttemptReveal {
+  is_correct: boolean;
+  correct_answer: string | null;
+  explanation: string | null;
 }
 
 const SESSION_QUESTION_COUNT = 10;
@@ -40,6 +50,7 @@ export default function QuizzesPage() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [showResult, setShowResult] = useState(false);
+  const [reveal, setReveal] = useState<AttemptReveal | null>(null);
   const [savingAnswer, setSavingAnswer] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
   const [sessionResults, setSessionResults] = useState<{ quizId: string; correct: boolean }[]>([]);
@@ -93,6 +104,7 @@ export default function QuizzesPage() {
     setCurrentIndex(0);
     setSelectedAnswer(null);
     setShowResult(false);
+    setReveal(null);
     setSavingAnswer(false);
     setAnswerError(null);
     setSessionResults([]);
@@ -129,11 +141,16 @@ export default function QuizzesPage() {
           time_spent_seconds: 0,
         }),
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || 'Failed to save quiz attempt');
+      const data = (await response.json().catch(() => ({}))) as AttemptReveal;
+      if (!response.ok) throw new Error(data.explanation ?? 'Failed to save quiz attempt');
 
       setSelectedAnswer(answer);
       setShowResult(true);
+      setReveal({
+        is_correct: data.is_correct === true,
+        correct_answer: data.correct_answer ?? null,
+        explanation: data.explanation ?? null,
+      });
       setSessionResults((prev) => [...prev, { quizId: quiz.id, correct: data.is_correct === true }]);
       setQuizzes((previous) => previous.filter((item) => item.id !== quiz.id));
       pendingAttempt.current = null;
@@ -149,6 +166,7 @@ export default function QuizzesPage() {
       setCurrentIndex((prev) => prev + 1);
       setSelectedAnswer(null);
       setShowResult(false);
+      setReveal(null);
       setAnswerError(null);
       pendingAttempt.current = null;
     }
@@ -233,13 +251,16 @@ export default function QuizzesPage() {
                 </div>
                 <div>
                   {currentQuiz.options.map((option, idx) => {
+                    const isCorrectOption =
+                      showResult && reveal
+                        ? reveal.correct_answer
+                          ? option.text === reveal.correct_answer
+                          : false
+                        : false;
                     let optionClass = 'quiz-option';
-                    if (showResult) {
-                      if (option.is_correct) optionClass += ' correct';
-                      else if (option.text === selectedAnswer) optionClass += ' incorrect';
-                    } else if (option.text === selectedAnswer) {
-                      optionClass += ' selected';
-                    }
+                    if (isCorrectOption) optionClass += ' correct';
+                    else if (showResult && option.text === selectedAnswer) optionClass += ' incorrect';
+                    else if (option.text === selectedAnswer) optionClass += ' selected';
 
                     return (
                       <div
@@ -249,17 +270,17 @@ export default function QuizzesPage() {
                       >
                         <span className="quiz-option-label">{option.label}</span>
                         <span>{option.text}</span>
-                        {showResult && option.is_correct && (
+                        {isCorrectOption && (
                           <CheckCircle2 size={16} style={{ marginLeft: 'auto', color: 'var(--accent-emerald)' }} />
                         )}
-                        {showResult && option.text === selectedAnswer && !option.is_correct && (
+                        {showResult && reveal && option.text === selectedAnswer && !isCorrectOption && (
                           <XCircle size={16} style={{ marginLeft: 'auto', color: 'var(--accent-rose)' }} />
                         )}
                       </div>
                     );
                   })}
                 </div>
-                {showResult && currentQuiz.explanation && (
+                {showResult && reveal?.explanation && (
                   <div style={{
                     marginTop: 'var(--space-4)',
                     padding: 'var(--space-4)',
@@ -269,7 +290,7 @@ export default function QuizzesPage() {
                     fontSize: 'var(--text-sm)',
                     color: 'var(--text-secondary)',
                   }}>
-                    <strong style={{ color: 'var(--accent-blue-light)' }}>Explanation:</strong> {currentQuiz.explanation}
+                    <strong style={{ color: 'var(--accent-blue-light)' }}>Explanation:</strong> {reveal.explanation}
                   </div>
                 )}
                 {answerError && (

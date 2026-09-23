@@ -9,6 +9,8 @@ interface AttemptResult {
   attempt_id: string;
   question_id: string;
   is_correct: boolean;
+  correct_answer: string | null;
+  explanation: string | null;
 }
 
 export async function POST(
@@ -43,7 +45,14 @@ export async function POST(
     const attempt = (data || [])[0] as AttemptResult | undefined;
     if (!attempt) return NextResponse.json({ error: 'Attempt could not be recorded' }, { status: 500 });
 
-    return NextResponse.json(attempt);
+    // Reveal data is only returned AFTER the answer has been recorded.
+    return NextResponse.json({
+      attempt_id: attempt.attempt_id,
+      question_id: attempt.question_id,
+      is_correct: attempt.is_correct,
+      correct_answer: attempt.correct_answer,
+      explanation: attempt.explanation,
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Could not record attempt';
     return NextResponse.json({ error: message }, { status: 500 });

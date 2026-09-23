@@ -13,14 +13,11 @@ interface QuizWithRelations {
   question: string;
   format: string;
   options: unknown;
-  answer: string;
-  explanation: string | null;
   source_page: number | null;
   stem: string | null;
   sub_questions: unknown;
   is_testlet: boolean;
   difficulty: string;
-  source_quote: string | null;
   created_at: string;
   files: { filename: string } | { filename: string }[] | null;
   topics: { name: string; icon: string } | { name: string; icon: string }[] | null;
@@ -35,11 +32,14 @@ export async function GET() {
   if (!supabase) return NextResponse.json({ quizzes: [] });
 
   try {
+    // NOTE: answer/explanation are intentionally NOT selected so the correct
+    // answer never reaches the browser before the user has answered. Reveal
+    // data is returned by the attempt POST endpoint after an answer is locked in.
     const { data: quizzes, error: quizzesError } = await supabase
       .from('quizzes')
       .select(`
-        id, file_id, topic_id, question, format, options, answer, explanation,
-        source_page, stem, sub_questions, is_testlet, difficulty, source_quote, created_at,
+        id, file_id, topic_id, question, format, options,
+        source_page, stem, sub_questions, is_testlet, difficulty, created_at,
         files:file_id(filename),
         topics:topic_id(name, icon)
         `)
@@ -67,7 +67,14 @@ export async function GET() {
       const { files, topics, ...rest } = q;
       const file = Array.isArray(files) ? files[0] : files;
       const topic = Array.isArray(topics) ? topics[0] : topics;
-      return { ...rest, file, topic };
+      return {
+        ...rest,
+        options: (rest.options as { label: string; text: string; is_correct: boolean }[]).map(
+          ({ label, text }) => ({ label, text }),
+        ),
+        file,
+        topic,
+      };
     });
 
     return NextResponse.json(

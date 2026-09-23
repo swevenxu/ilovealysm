@@ -18,7 +18,6 @@ import {
 interface Option {
     label: 'A' | 'B' | 'C' | 'D';
     text: string;
-    is_correct: boolean;
 }
 
 interface ReviewQuestion {
@@ -26,13 +25,18 @@ interface ReviewQuestion {
     question_text: string;
     format: 'multiple_choice';
     options: Option[];
-    correct_answer: string;
-    explanation: string | null;
     difficulty: string | null;
     stem: string | null;
     sub_questions: { number: number; text: string }[] | null;
     is_testlet: boolean;
     source_quote: string | null;
+}
+
+/** Reveal data, sent by the server only after an answer is recorded. */
+interface AttemptReveal {
+    is_correct: boolean;
+    correct_answer: string | null;
+    explanation: string | null;
 }
 
 interface Group {
@@ -312,6 +316,7 @@ function ReviewSession({
     const [index, setIndex] = useState(0);
     const [selected, setSelected] = useState<string | null>(null);
     const [revealed, setRevealed] = useState(false);
+    const [reveal, setReveal] = useState<AttemptReveal | null>(null);
     const [answering, setAnswering] = useState(false);
     const [answerError, setAnswerError] = useState<string | null>(null);
     const [results, setResults] = useState<boolean[]>([]);
@@ -345,11 +350,16 @@ function ReviewSession({
                     time_spent_seconds: 0,
                 }),
             });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || 'Could not save your answer');
+            const data = (await response.json().catch(() => ({}))) as AttemptReveal;
+            if (!response.ok) throw new Error(data.explanation ?? 'Could not save your answer');
 
             setSelected(opt.text);
             setRevealed(true);
+            setReveal({
+                is_correct: data.is_correct === true,
+                correct_answer: data.correct_answer ?? null,
+                explanation: data.explanation ?? null,
+            });
             setResults((prev) => [...prev, data.is_correct === true]);
             pendingAttempt.current = null;
         } catch (error) {
@@ -361,6 +371,7 @@ function ReviewSession({
     function next() {
         setSelected(null);
         setRevealed(false);
+        setReveal(null);
         setAnswerError(null);
         pendingAttempt.current = null;
         setIndex((i) => i + 1);
@@ -510,13 +521,14 @@ function ReviewSession({
                     {/* Options */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
                         {q.options.map((option, idx) => {
+                            const isCorrectOption =
+                                revealed && reveal?.correct_answer
+                                    ? option.text === reveal.correct_answer
+                                    : false;
                             let optionClass = 'quiz-option';
-                            if (revealed) {
-                                if (option.is_correct) optionClass += ' correct';
-                                else if (option.text === selected) optionClass += ' incorrect';
-                            } else if (option.text === selected) {
-                                optionClass += ' selected';
-                            }
+                            if (isCorrectOption) optionClass += ' correct';
+                            else if (revealed && option.text === selected) optionClass += ' incorrect';
+                            else if (option.text === selected) optionClass += ' selected';
 
                             return (
                                 <div
@@ -527,7 +539,7 @@ function ReviewSession({
                                 >
                                     <span className="quiz-option-label">{option.label}</span>
                                     <span style={{ flex: 1, minWidth: 0 }}>{option.text}</span>
-                                    {revealed && option.is_correct && (
+                                    {isCorrectOption && (
                                         <CheckCircle2
                                             size={16}
                                             style={{
@@ -536,9 +548,7 @@ function ReviewSession({
                                             }}
                                         />
                                     )}
-                                    {revealed &&
-                                        option.text === selected &&
-                                        !option.is_correct && (
+                                    {revealed && option.text === selected && !isCorrectOption && (
                                             <XCircle
                                                 size={16}
                                                 style={{
@@ -574,7 +584,7 @@ function ReviewSession({
                     )}
 
                     {/* Explanation */}
-                    {revealed && q.explanation && (
+                    {revealed && reveal?.explanation && (
                         <div
                             style={{
                                 marginTop: 'var(--space-4)',
@@ -590,7 +600,7 @@ function ReviewSession({
                             <strong style={{ color: 'var(--accent-blue-light)' }}>
                                 Explanation:
                             </strong>{' '}
-                            {q.explanation}
+                            {reveal.explanation}
                         </div>
                     )}
 
